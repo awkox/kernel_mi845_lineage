@@ -934,6 +934,8 @@ int cpufreq_generic_init(struct cpufreq_policy *policy,
 		unsigned int transition_latency);
 
 extern unsigned int cpuinfo_max_freq_cached;
+void scale_freq_capacity(const cpumask_t *cpus, unsigned long cur_freq,
+			 unsigned long max_freq);
 
 struct sched_domain;
 unsigned long cpufreq_scale_freq_capacity(struct sched_domain *sd, int cpu);
