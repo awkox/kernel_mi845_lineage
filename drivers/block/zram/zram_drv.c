@@ -169,7 +169,7 @@ static inline bool valid_io_request(struct zram *zram,
 
 	end = start + (size >> SECTOR_SHIFT);
 	bound = zram->disksize >> SECTOR_SHIFT;
-	/* out of range range */
+	/* out of range */
 	if (unlikely(start >= bound || end > bound || start > end))
 		return false;
 
@@ -1959,7 +1959,7 @@ static int zram_add(void)
 	snprintf(zram->disk->disk_name, 16, "zram%d", device_id);
 
 	__set_bit(QUEUE_FLAG_FAST, &zram->disk->queue->queue_flags);
-	/* Actual capacity set using syfs (/sys/block/zram<id>/disksize */
+	/* Actual capacity set using sysfs (/sys/block/zram<id>/disksize */
 	set_capacity(zram->disk, 0);
 	/* zram devices sort of resembles non-rotational disks */
 	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, zram->disk->queue);
