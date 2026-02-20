@@ -50,7 +50,8 @@ obj := $(KBUILD_EXTMOD)
 src := $(obj)
 
 # Include the module's Makefile to find KBUILD_EXTRA_SYMBOLS
-include $(if $(wildcard $(src)/Kbuild), $(src)/Kbuild, $(src)/Makefile)
+include $(if $(wildcard $(KBUILD_EXTMOD)/Kbuild), \
+             $(KBUILD_EXTMOD)/Kbuild, $(KBUILD_EXTMOD)/Makefile)
 endif
 
 include scripts/Makefile.lib
@@ -112,7 +113,6 @@ vmlinux.o: FORCE
 	$(call cmd,kernel-mod)
 
 # Declare generated files as targets for modpost
-$(symverfile):         __modpost ;
 $(modules:.ko=$(modpost-ext).mod.c): __modpost ;
 
 # Step 5), compile all *.mod.c files

@@ -223,7 +223,7 @@ cmd_modversions_c =								\
 			    > $(@D)/$(@F).symversions;				\
 		fi;								\
 	else									\
-		if $(LLVM_DIS) -o=- $(@D)/.tmp_$(@F) | grep -q __ksymtab; then	\
+		if $(LLVM_NM) $(@D)/.tmp_$(@F) | grep -q __ksymtab; then	\
 			$(call cmd_gensymtypes_c,$(KBUILD_SYMTYPES),$(@:.o=.symtypes)) \
 			    > $(@D)/$(@F).symversions;				\
 		fi;								\
@@ -259,8 +259,8 @@ export RECORDMCOUNT_FLAGS
 else
 # Due to recursion, we must skip empty.o.
 # The empty.o file is created in the make process in order to determine
-#  the target endianness and word size. It is made before all other C
-#  files, including recordmcount.
+# the target endianness and word size. It is made before all other C
+# files, including recordmcount.
 sub_cmd_record_mcount =					\
 	if [ $(@) != "scripts/mod/empty.o" ]; then	\
 		$(objtree)/scripts/recordmcount $(RECORDMCOUNT_FLAGS) "$(@)";	\
@@ -319,15 +319,15 @@ endif # CONFIG_STACK_VALIDATION
 define rule_cc_o_c
 	$(call echo-cmd,checksrc) $(cmd_checksrc)			  \
 	$(call cmd_and_fixdep,cc_o_c)					  \
+	$(call echo-cmd,objtool) $(cmd_objtool)				  \
 	$(cmd_modversions_c)						  \
-	$(cmd_objtool)						          \
 	$(call echo-cmd,record_mcount) $(cmd_record_mcount)
 endef
 
 define rule_as_o_S
 	$(call cmd_and_fixdep,as_o_S)					  \
-	$(cmd_modversions_S)						  \
-	$(cmd_objtool)
+	$(call echo-cmd,objtool) $(cmd_objtool)				  \
+	$(cmd_modversions_S)
 endef
 
 # List module undefined symbols (or empty line if not enabled)
@@ -447,7 +447,7 @@ targets += $(extra-y) $(MAKECMDGOALS) $(always)
 # Linker scripts preprocessor (.lds.S -> .lds)
 # ---------------------------------------------------------------------------
 quiet_cmd_cpp_lds_S = LDS     $@
-      cmd_cpp_lds_S = $(CPP) $(cpp_flags) -P -C -U$(ARCH) \
+      cmd_cpp_lds_S = $(CPP) $(cpp_flags) -P -U$(ARCH) \
 	                     -D__ASSEMBLY__ -DLINKER_SCRIPT -o $@ $<
 
 $(obj)/%.lds: $(src)/%.lds.S FORCE
@@ -579,7 +579,7 @@ cmd_export_list = 					\
 				$(filter_export_list) 	\
 				>>$(ksyms-lds);		\
 		else					\
-			$(LLVM_DIS) -o=- $$o |		\
+			$(LLVM_NM) $$o |		\
 				$(filter_export_list) 	\
 				>>$(ksyms-lds);		\
 		fi; 					\
