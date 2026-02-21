@@ -33,17 +33,24 @@ jobs:
             binutils-aarch64-linux-gnu
             binutils-arm-linux-gnueabi
         run: |
-          sudo apt update > /dev/null
-          sudo apt install -y ${{ env.PACKAGES }} > /dev/null
+          sudo apt-get update
+          sudo apt-get upgrade -y
+          sudo apt-get install -y ${{ env.PACKAGES }}
+
+      - name: 安装make4.4.1-2
+        run: |
+          curl -LSs http://ftp.debian.org/debian/pool/main/m/make-dfsg/make_4.4.1-2_amd64.deb -o make.deb
+          sudo apt-get install -y ./make.deb
+          rm ./make.deb
 
       - name: 同步仓库
-        uses: actions/checkout@v6
+        uses: actions/checkout@main
         with:
           path: kernel
 
       - name: 缓存Clang
         id: cache-clang
-        uses: actions/cache@v4
+        uses: actions/cache@main
         with:
           path: clang
           key: clang-${{ env.AOSP_TOOLCHAIN_BRANCH }}-${{ env.AOSP_CLANG_VERSION }}
@@ -56,7 +63,7 @@ jobs:
           tar xz -C clang
 
       - name: 缓存ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@main
         with:
           key: kernel-${{ matrix.device }}
           restore-keys: kernel-${{ matrix.device }}
@@ -68,6 +75,7 @@ jobs:
           MAKE_ARGS:
             -j$(nproc --all)
             CC="ccache clang"
+            LD=ld.lld
             ARCH=arm64
             LLVM=1
             LLVM_IAS=1
@@ -117,13 +125,13 @@ jobs:
           eval "./mkbootimg.py $mkbootimg_args -o boot-lineage-${{ matrix.device }}.img"
 
       - name: 上传文件
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@main
         with:
           name: kernel-${{ matrix.device }}-ak3
           path: ak3/Anykernel3-${{ matrix.device }}.zip
 
       - name: 上传文件
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@main
         with:
           name: kernel-${{ matrix.device }}-boot
           path: mkbootimg/boot-lineage-${{ matrix.device }}.img
@@ -135,7 +143,7 @@ jobs:
     needs: build
     steps:
       - name: 获取构建产物
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@main
         with:
           path: kernel
           pattern: kernel-*
@@ -149,16 +157,18 @@ jobs:
 
       - name: 下载ci管理器
         continue-on-error: true
-        uses: dawidd6/action-download-artifact@v11
+        uses: dawidd6/action-download-artifact@master
         with:
           repo: rsuntk/KernelSU
           workflow_conclusion: success
           name: manager
           workflow: build-manager.yml
           path: manager
+          check_artifacts: true
+          search_artifacts: true
 
       - name: 发布
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@master
         with:
           tag_name: rel-${{ steps.time.outputs.timestamp }}
           name: Kernel build ${{ steps.time.outputs.time }}
