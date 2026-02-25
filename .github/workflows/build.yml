@@ -34,7 +34,6 @@ jobs:
             binutils-arm-linux-gnueabi
         run: |
           sudo apt-get update  -y -q
-          sudo apt-get upgrade -y -q
           sudo apt-get install -y -q ${{ env.PACKAGES }}
 
       - name: 安装make4.4.1-2
