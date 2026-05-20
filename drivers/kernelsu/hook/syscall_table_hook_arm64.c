@@ -6,8 +6,6 @@
 // ref: https://elixir.bootlin.com/linux/v4.14.1/source/arch/arm64/include/asm/unistd32.h
 // ref: https://elixir.bootlin.com/linux/v4.14.1/source/arch/arm64/include/asm/unistd.h
 
-#define FORCE_VOLATILE(x) *(volatile typeof(x) *)&(x)
-
 #define __AARCH64_reboot	142
 #define __AARCH64_execve	221
 #define __AARCH64_faccessat	48
@@ -28,7 +26,7 @@
 // on 4.19+ its is no longer just a void *sys_call_table[]
 // it becomes syscall_fn_t sys_call_table[];
 
-static syscall_fn_t aarch64_reboot = NULL; 
+static syscall_fn_t aarch64_reboot __read_mostly = NULL; 
 static long hook_aarch64_reboot(const struct pt_regs *regs)
 {
 	int magic1 = (int)regs->regs[0];
@@ -40,17 +38,20 @@ static long hook_aarch64_reboot(const struct pt_regs *regs)
 	return aarch64_reboot(regs);
 }
 
-static syscall_fn_t aarch64_execve = NULL;
+static syscall_fn_t aarch64_execve __read_mostly = NULL;
+__attribute__((hot))
 static long hook_aarch64_execve(const struct pt_regs *regs)
 {
 	const char __user **filename = (const char __user **)&regs->regs[0];
+	void ***argv = (void ***)&regs->regs[1];
 	void ***envp = (void ***)&regs->regs[2];
 
-	ksu_handle_execve_sucompat(NULL, filename, NULL, envp, NULL);
+	ksu_handle_execve(filename, argv, envp);
 	return aarch64_execve(regs);
 }
 
-static syscall_fn_t aarch64_faccessat = NULL;
+static syscall_fn_t aarch64_faccessat __read_mostly = NULL;
+__attribute__((hot))
 static long hook_aarch64_faccessat(const struct pt_regs *regs)
 {
 	const char __user **filename = (const char __user **)&regs->regs[1];
@@ -59,7 +60,8 @@ static long hook_aarch64_faccessat(const struct pt_regs *regs)
 	return aarch64_faccessat(regs);
 }
 
-static syscall_fn_t aarch64_newfstatat = NULL;
+static syscall_fn_t aarch64_newfstatat __read_mostly = NULL;
+__attribute__((hot))
 static long hook_aarch64_newfstatat(const struct pt_regs *regs)
 {
 	const char __user **filename = (const char __user **)&regs->regs[1];
@@ -68,7 +70,8 @@ static long hook_aarch64_newfstatat(const struct pt_regs *regs)
 	return aarch64_newfstatat(regs);
 }
 
-static syscall_fn_t aarch64_newfstat = NULL;
+static syscall_fn_t aarch64_newfstat __read_mostly = NULL;
+__attribute__((cold))
 static long hook_aarch64_newfstat_ret(const struct pt_regs *regs)
 {
 	// we handle it like rp
@@ -80,7 +83,8 @@ static long hook_aarch64_newfstat_ret(const struct pt_regs *regs)
 	return ret;
 }
 
-static syscall_fn_t aarch64_read = NULL;
+static syscall_fn_t aarch64_read __read_mostly = NULL;
+__attribute__((cold))
 static long hook_aarch64_read(const struct pt_regs *regs)
 {
 	unsigned int fd = (unsigned int)regs->regs[0];
@@ -90,7 +94,7 @@ static long hook_aarch64_read(const struct pt_regs *regs)
 }
 
 #ifdef CONFIG_COMPAT
-static syscall_fn_t armeabi_reboot = NULL;
+static syscall_fn_t armeabi_reboot __read_mostly = NULL;
 static long hook_armeabi_reboot(const struct pt_regs *regs)
 {
 	int magic1 = (int)regs->regs[0];
@@ -102,17 +106,20 @@ static long hook_armeabi_reboot(const struct pt_regs *regs)
 	return armeabi_reboot(regs);
 }
 
-static syscall_fn_t armeabi_execve = NULL;
+static syscall_fn_t armeabi_execve __read_mostly = NULL;
+__attribute__((hot))
 static long hook_armeabi_execve(const struct pt_regs *regs)
 {
 	const char __user **filename = (const char __user **)&regs->regs[0];
+	void ***argv = (void ***)&regs->regs[1];
 	void ***envp = (void ***)&regs->regs[2];
 
-	ksu_handle_execve_sucompat(NULL, filename, NULL, envp, NULL);
+	ksu_handle_execve(filename, argv, envp);
 	return armeabi_execve(regs);
 }
 
-static syscall_fn_t armeabi_faccessat = NULL;
+static syscall_fn_t armeabi_faccessat __read_mostly = NULL;
+__attribute__((hot))
 static long hook_armeabi_faccessat(const struct pt_regs *regs)
 {
 	const char __user **filename = (const char __user **)&regs->regs[1];
@@ -121,7 +128,8 @@ static long hook_armeabi_faccessat(const struct pt_regs *regs)
 	return armeabi_faccessat(regs);
 }
 
-static syscall_fn_t armeabi_fstatat64 = NULL;
+static syscall_fn_t armeabi_fstatat64 __read_mostly = NULL;
+__attribute__((hot))
 static long hook_armeabi_fstatat64(const struct pt_regs *regs)
 {
 	const char __user **filename = (const char __user **)&regs->regs[1];
@@ -130,7 +138,8 @@ static long hook_armeabi_fstatat64(const struct pt_regs *regs)
 	return armeabi_fstatat64(regs);
 }
 
-static syscall_fn_t armeabi_fstat64 = NULL;
+static syscall_fn_t armeabi_fstat64 __read_mostly = NULL;
+__attribute__((cold))
 static long hook_armeabi_fstat64_ret(const struct pt_regs *regs)
 {
 	// we handle it like rp
@@ -142,7 +151,8 @@ static long hook_armeabi_fstat64_ret(const struct pt_regs *regs)
 	return ret;
 }
 
-static syscall_fn_t armeabi_read = NULL;
+static syscall_fn_t armeabi_read __read_mostly = NULL;
+__attribute__((cold))
 static long hook_armeabi_read(const struct pt_regs *regs)
 {
 	unsigned int fd = (unsigned int)regs->regs[0];	
@@ -155,103 +165,115 @@ static long hook_armeabi_read(const struct pt_regs *regs)
 
 #else // END OF 4.19+ SYSCALL HANDLERS
 
-static long (*aarch64_reboot)(int magic1, int magic2, unsigned int cmd, void __user *arg) = NULL;
+/**
+ *  for legacy syscall abi, we straight up call the syscall symbol
+ *  this is easier and maybe a little bit faster
+ *
+ */
+
+static uintptr_t aarch64_reboot __read_mostly = NULL;
 static long hook_aarch64_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg)
 {
 	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
-	return aarch64_reboot(magic1, magic2, cmd, arg);
+	return sys_reboot(magic1, magic2, cmd, arg);
 }
 
-static long (*aarch64_execve)(const char __user * filename,
-				const char __user *const __user * argv,
-				const char __user *const __user * envp) = NULL;
+static uintptr_t aarch64_execve __read_mostly = NULL;
+__attribute__((hot))
 static long hook_aarch64_execve(const char __user * filename,
 				const char __user *const __user * argv,
 				const char __user *const __user * envp)
 {
-	ksu_handle_execve_sucompat(NULL, &filename, NULL, (void ***)&envp, NULL);
-	return aarch64_execve(filename, argv, envp);
+	ksu_handle_execve(&filename, (void ***)&argv, (void ***)&envp);
+	return sys_execve(filename, argv, envp);
 }
 
-static long (*aarch64_faccessat)(int dfd, const char __user * filename, int mode) = NULL;
+static uintptr_t aarch64_faccessat __read_mostly = NULL;
+__attribute__((hot))
 static long hook_aarch64_faccessat(int dfd, const char __user * filename, int mode)
 {
 	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-	return aarch64_faccessat(dfd, filename, mode);
+	return sys_faccessat(dfd, filename, mode);
 }
 
-static long (*aarch64_newfstatat)(int dfd, const char __user * filename, struct stat __user * statbuf, int flag) = NULL;
+static uintptr_t aarch64_newfstatat __read_mostly = NULL;
+__attribute__((hot))
 static long hook_aarch64_newfstatat(int dfd, const char __user * filename, struct stat __user * statbuf, int flag)
 {
 	ksu_handle_stat(&dfd, &filename, &flag);
-	return aarch64_newfstatat(dfd, filename, statbuf, flag);
+	return sys_newfstatat(dfd, filename, statbuf, flag);
 }
 
-static long (*aarch64_newfstat)(unsigned int fd, struct stat __user * statbuf) = NULL;
+static uintptr_t aarch64_newfstat __read_mostly = NULL;
+__attribute__((cold))
 static long hook_aarch64_newfstat_ret(unsigned int fd, struct stat __user * statbuf)
 {
 	// we handle it like rp
-	long ret = aarch64_newfstat(fd, statbuf);
+	long ret = sys_newfstat(fd, statbuf);
 	ksu_handle_newfstat_ret(&fd, &statbuf);
 	return ret;
 }
 
-static long (*aarch64_read)(unsigned int fd, char __user *buf, size_t count) = NULL;
+static uintptr_t aarch64_read __read_mostly = NULL;
+__attribute__((cold))
 static long hook_aarch64_read(unsigned int fd, char __user *buf, size_t count)
 {
 	ksu_handle_sys_read_fd(fd);
-	return aarch64_read(fd, buf, count);
+	return sys_read(fd, buf, count);
 }
 
 #ifdef CONFIG_COMPAT
 extern const void *compat_sys_call_table[];
 
-static long (*armeabi_reboot)(int magic1, int magic2, unsigned int cmd, void __user *arg) = NULL;
+static uintptr_t armeabi_reboot __read_mostly = NULL;
 static long hook_armeabi_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg)
 {
 	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
-	return armeabi_reboot(magic1, magic2, cmd, arg);
+	return sys_reboot(magic1, magic2, cmd, arg);
 }
 
-static long (*armeabi_execve)(const char __user * filename,
-				const compat_uptr_t __user * argv,
-				const compat_uptr_t __user * envp) = NULL;
+static uintptr_t armeabi_execve __read_mostly = NULL;
+__attribute__((hot))
 static long hook_armeabi_execve(const char __user * filename,
 				const compat_uptr_t __user * argv,
 				const compat_uptr_t __user * envp)
 {
-	ksu_handle_execve_sucompat(NULL, &filename, NULL, (void ***)&envp, NULL);
-	return armeabi_execve(filename, argv, envp);
+	ksu_handle_execve(&filename, (void ***)&argv, (void ***)&envp);
+	return compat_sys_execve(filename, argv, envp);
 }
 
-static long (*armeabi_faccessat)(int dfd, const char __user * filename, int mode) = NULL;
+static uintptr_t armeabi_faccessat __read_mostly = NULL;
+__attribute__((hot))
 static long hook_armeabi_faccessat(int dfd, const char __user * filename, int mode)
 {
 	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-	return armeabi_faccessat(dfd, filename, mode);
+	return sys_faccessat(dfd, filename, mode);
 }
 
-static long (*armeabi_fstatat64)(int dfd, const char __user * filename, struct stat64 __user * statbuf, int flag) = NULL;
+static uintptr_t armeabi_fstatat64 __read_mostly = NULL;
+__attribute__((hot))
 static long hook_armeabi_fstatat64(int dfd, const char __user * filename, struct stat64 __user * statbuf, int flag)
 {
 	ksu_handle_stat(&dfd, &filename, &flag);
-	return armeabi_fstatat64(dfd, filename, statbuf, flag);
+	return sys_fstatat64(dfd, filename, statbuf, flag);
 }
 
-static long (*armeabi_fstat64)(unsigned long fd, struct stat64 __user * statbuf) = NULL;
+static uintptr_t armeabi_fstat64 __read_mostly = NULL;
+__attribute__((cold))
 static long hook_armeabi_fstat64_ret(unsigned long fd, struct stat64 __user * statbuf)
 {
 	// we handle it like rp
-	long ret = armeabi_fstat64(fd, statbuf);
+	long ret = sys_fstat64(fd, statbuf);
 	ksu_handle_fstat64_ret(&fd, &statbuf);
 	return ret;
 }
 
-static long (*armeabi_read)(unsigned int fd, char __user *buf, size_t count) = NULL;
+static uintptr_t armeabi_read __read_mostly = NULL;
+__attribute__((cold))
 static long hook_armeabi_read(unsigned int fd, char __user *buf, size_t count)
 {
 	ksu_handle_sys_read_fd(fd);
-	return armeabi_read(fd, buf, count);
+	return sys_read(fd, buf, count);
 }
 
 #endif // CONFIG_COMPAT
@@ -326,8 +348,6 @@ static void read_and_replace_syscall(void *old_ptr, unsigned long syscall_nr, vo
 
 	smp_mb(); 
 }
-
-extern long copy_from_kernel_nofault(void *dst, const void *src, size_t size);
 
 static void restore_syscall(void *old_ptr, unsigned long syscall_nr, void *new_ptr, void *target_table)
 {
@@ -409,11 +429,13 @@ out:
 
 static int ksu_syscall_table_restore()
 {
+	set_user_nice(current, 19); // low prio
+
 loop_start:
 
 	msleep(1000);
 
-	if (FORCE_VOLATILE(ksu_vfs_read_hook))
+	if (*(volatile bool *)&ksu_vfs_read_hook)
 		goto loop_start;
 
 	restore_syscall((void *)&aarch64_newfstat, __AARCH64_newfstat, (void *)hook_aarch64_newfstat_ret, (void *)sys_call_table);
@@ -425,37 +447,6 @@ loop_start:
 #endif
 	
 	return 0;
-}
-
-static void vfs_read_hook_wait_thread()
-{
-	kthread_run(ksu_syscall_table_restore, NULL, "unhook");
-}
-
-static void ksu_syscall_table_hook_init()
-{
-	read_and_replace_syscall((void *)&aarch64_reboot, __AARCH64_reboot, (void *)hook_aarch64_reboot, (void *)sys_call_table);
-	read_and_replace_syscall((void *)&aarch64_execve, __AARCH64_execve, (void *)hook_aarch64_execve, (void *)sys_call_table);
-	read_and_replace_syscall((void *)&aarch64_faccessat, __AARCH64_faccessat, (void *)hook_aarch64_faccessat, (void *)sys_call_table);
-	read_and_replace_syscall((void *)&aarch64_newfstatat, __AARCH64_newfstatat, (void *)hook_aarch64_newfstatat, (void *)sys_call_table);
-
-	// will be unregged
-	read_and_replace_syscall((void *)&aarch64_newfstat, __AARCH64_newfstat, (void *)hook_aarch64_newfstat_ret, (void *)sys_call_table);
-	read_and_replace_syscall((void *)&aarch64_read, __AARCH64_read, (void *)hook_aarch64_read, (void *)sys_call_table);
-
-#if defined(CONFIG_COMPAT)
-	read_and_replace_syscall((void *)&armeabi_reboot, __ARMEABI_reboot, (void *)hook_armeabi_reboot, (void *)compat_sys_call_table);
-	read_and_replace_syscall((void *)&armeabi_execve, __ARMEABI_execve, (void *)hook_armeabi_execve, (void *)compat_sys_call_table);
-	read_and_replace_syscall((void *)&armeabi_faccessat, __ARMEABI_faccessat, (void *)hook_armeabi_faccessat, (void *)compat_sys_call_table);
-	read_and_replace_syscall((void *)&armeabi_fstatat64, __ARMEABI_fstatat64, (void *)hook_armeabi_fstatat64, (void *)compat_sys_call_table);
-
-	// will be unregged
-	read_and_replace_syscall((void *)&armeabi_fstat64, __ARMEABI_fstat64, (void *)hook_armeabi_fstat64_ret, (void *)compat_sys_call_table);
-	read_and_replace_syscall((void *)&armeabi_read, __ARMEABI_read, (void *)hook_armeabi_read, (void *)compat_sys_call_table);
-
-#endif // COMPAT
-
-	vfs_read_hook_wait_thread(); // start unreg kthread
 }
 
 static DEFINE_MUTEX(sucompat_toggle_mutex);
@@ -493,5 +484,30 @@ static void syscall_table_sucompat_disable()
 
 	mutex_unlock(&sucompat_toggle_mutex);
 }
+
+static __init int ksu_syscall_table_hook_init()
+{
+	// enable on init!
+	syscall_table_sucompat_enable();
+
+	read_and_replace_syscall((void *)&aarch64_reboot, __AARCH64_reboot, (void *)hook_aarch64_reboot, (void *)sys_call_table);
+
+	// will be unregged
+	read_and_replace_syscall((void *)&aarch64_newfstat, __AARCH64_newfstat, (void *)hook_aarch64_newfstat_ret, (void *)sys_call_table);
+	read_and_replace_syscall((void *)&aarch64_read, __AARCH64_read, (void *)hook_aarch64_read, (void *)sys_call_table);
+
+#if defined(CONFIG_COMPAT)
+	read_and_replace_syscall((void *)&armeabi_reboot, __ARMEABI_reboot, (void *)hook_armeabi_reboot, (void *)compat_sys_call_table);
+
+	// will be unregged
+	read_and_replace_syscall((void *)&armeabi_fstat64, __ARMEABI_fstat64, (void *)hook_armeabi_fstat64_ret, (void *)compat_sys_call_table);
+	read_and_replace_syscall((void *)&armeabi_read, __ARMEABI_read, (void *)hook_armeabi_read, (void *)compat_sys_call_table);
+#endif // COMPAT
+
+	// start unreg kthread
+	kthread_run(ksu_syscall_table_restore, NULL, "unhook");
+	return 0;
+}
+late_initcall(ksu_syscall_table_hook_init);
 
 // EOF

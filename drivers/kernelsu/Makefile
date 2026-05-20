@@ -5,6 +5,16 @@ obj-$(CONFIG_KSU) := ksu.o
 CFLAGS_ksu.o += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include
 CFLAGS_ksu.o += -I$(objtree)/security/selinux
 
+# uncommon, but wont hurt, check for 3-arg security_add_hooks
+ifeq ($(shell grep -A1 "void security_add_hooks" $(srctree)/include/linux/lsm_hooks.h 2>/dev/null | grep -q lsm 2>/dev/null; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_COMPAT_SECURITY_ADD_HOOKS_V2
+endif
+
+# see security_delete_hooks
+ifeq ($(shell grep -A5 "^struct security_hook_list" $(srctree)/include/linux/lsm_hooks.h 2>/dev/null | grep -q "struct hlist_node" 2>/dev/null; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_COMPAT_SECURITY_DELETE_HOOKS_HLIST
+endif
+
 ifeq ($(shell grep -q " current_sid(void)" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
 CFLAGS_ksu.o += -DKSU_COMPAT_HAS_CURRENT_SID
 endif
@@ -13,12 +23,25 @@ ifeq ($(shell grep -q "struct selinux_state " $(srctree)/security/selinux/includ
 CFLAGS_ksu.o += -DKSU_COMPAT_HAS_SELINUX_STATE
 endif
 
+ifeq ($(shell grep -q "struct type_datum \*\*type_val_to_struct;" $(srctree)/security/selinux/ss/policydb.h; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_TYPE_VAL_TO_STRUCT
+endif
+
+# half-assed-backport from 5.1
+ifeq ($(shell grep -q "struct type_datum \*\*type_val_to_struct_array;" $(srctree)/security/selinux/ss/policydb.h; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_TYPE_VAL_TO_STRUCT_ARRAY
+endif
+
 ifeq ($(shell grep -q "^DEFINE_RWLOCK(policy_rwlock);" $(srctree)/security/selinux/ss/services.c; echo $$?),0)
 CFLAGS_ksu.o += -DKSU_COMPAT_HAS_EXPORTED_POLICY_RWLOCK
 endif
 
 ifeq ($(shell grep -q "cpus_ptr;" $(srctree)/include/linux/sched.h; echo $$?),0)
 CFLAGS_ksu.o += -DKSU_COMPAT_HAS_BACKPORTED_CPUS_PTR
+endif
+
+ifeq ($(shell grep -q "^struct security_operations selinux_ops" $(srctree)/security/selinux/hooks.c; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_HAS_EXPORTED_SELINUX_OPS
 endif
 
 # UL, look for read_iter on f_op struct
@@ -31,26 +54,13 @@ ifeq ($(shell grep -q "^int iterate_dir" $(srctree)/fs/readdir.c 2>/dev/null; ec
 CFLAGS_ksu.o += -DKSU_HAS_ITERATE_DIR
 endif
 
-ifeq ($(shell grep -q "selinux_inode" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
-CFLAGS_ksu.o += -DKSU_HAS_SELINUX_INODE
-endif
+CFLAGS_ksu.o += -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-declaration-after-statement 
+CFLAGS_ksu.o += -Wno-int-conversion -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast
+CFLAGS_ksu.o += -Wno-unused-variable -Wno-unused-function -Wno-format
+CFLAGS_ksu.o += -Wno-macro-redefined
 
-ifeq ($(shell grep -q "selinux_cred" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
-CFLAGS_ksu.o += -DKSU_HAS_SELINUX_CRED
-endif
-
-ifeq ($(shell grep -q "struct type_datum \*\*type_val_to_struct;" $(srctree)/security/selinux/ss/policydb.h; echo $$?),0)
-CFLAGS_ksu.o += -DKSU_TYPE_VAL_TO_STRUCT
-endif
-
-# half-assed-backport from 5.1
-ifeq ($(shell grep -q "struct type_datum \*\*type_val_to_struct_array;" $(srctree)/security/selinux/ss/policydb.h; echo $$?),0)
-CFLAGS_ksu.o += -DKSU_TYPE_VAL_TO_STRUCT_ARRAY
-endif
-
-CFLAGS_ksu.o += -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-int-conversion -Wno-missing-prototypes
-CFLAGS_ksu.o += -Wno-declaration-after-statement -Wno-unused-function -Wno-format -Wno-incompatible-pointer-types
-CFLAGS_ksu.o += -Wno-unused-variable -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast
+# dont be too strict
+CFLAGS_REMOVE_ksu.o += -Werror
 
 # so we can see stack use atleast, as we disable all stack safety here
 CFLAGS_ksu.o += $(call cc-option, -Wframe-larger-than=1024)
