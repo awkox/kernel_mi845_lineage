@@ -380,19 +380,12 @@ static __init int ksu_syscall_table_hook_init()
 
 	read_and_replace_syscall((void *)&armeabi_reboot, __ARMEABI_reboot, (void *)hook_armeabi_reboot, (void *)sys_call_table);
 
-	// theres an issue on fstat64 on oabi, so lets not hook it
-	// this is not that much of a loss since 3.0 / 3.4 devices aren't really running A17
-	// TODO: fix and handle this
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0)
 	read_and_replace_syscall((void *)&armeabi_fstat64, __ARMEABI_fstat64, (void *)hook_armeabi_fstat64_ret, (void *)sys_call_table);
-#endif
-
 	read_and_replace_syscall((void *)&armeabi_read, __ARMEABI_read, (void *)hook_armeabi_read, (void *)sys_call_table);
 
 	// start unreg kthread
 	kthread_run(ksu_syscall_table_restore, NULL, "unhook");
 	return 0;
 }
-device_initcall_sync(ksu_syscall_table_hook_init);
 
 // EOF

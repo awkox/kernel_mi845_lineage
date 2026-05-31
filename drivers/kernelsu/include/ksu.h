@@ -1,7 +1,7 @@
 #ifndef __KSU_H_KSU
 #define __KSU_H_KSU
 
-#define KERNEL_SU_VERSION 32497
+#define KERNEL_SU_VERSION 32507
 
 #define EVENT_POST_FS_DATA 1
 #define EVENT_BOOT_COMPLETED 2

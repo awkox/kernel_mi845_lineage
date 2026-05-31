@@ -10,6 +10,10 @@ ifeq ($(shell grep -A1 "void security_add_hooks" $(srctree)/include/linux/lsm_ho
 CFLAGS_ksu.o += -DKSU_COMPAT_SECURITY_ADD_HOOKS_V2
 endif
 
+ifeq ($(shell grep -q "^struct security_operations selinux_ops" $(srctree)/security/selinux/hooks.c; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_HAS_EXPORTED_SELINUX_OPS
+endif
+
 # see security_delete_hooks
 ifeq ($(shell grep -A5 "^struct security_hook_list" $(srctree)/include/linux/lsm_hooks.h 2>/dev/null | grep -q "struct hlist_node" 2>/dev/null; echo $$?),0)
 CFLAGS_ksu.o += -DKSU_COMPAT_SECURITY_DELETE_HOOKS_HLIST
@@ -38,10 +42,6 @@ endif
 
 ifeq ($(shell grep -q "cpus_ptr;" $(srctree)/include/linux/sched.h; echo $$?),0)
 CFLAGS_ksu.o += -DKSU_COMPAT_HAS_BACKPORTED_CPUS_PTR
-endif
-
-ifeq ($(shell grep -q "^struct security_operations selinux_ops" $(srctree)/security/selinux/hooks.c; echo $$?),0)
-CFLAGS_ksu.o += -DKSU_HAS_EXPORTED_SELINUX_OPS
 endif
 
 # UL, look for read_iter on f_op struct

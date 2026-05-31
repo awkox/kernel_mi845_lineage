@@ -42,12 +42,15 @@
 #include "feature/sucompat.h"
 #include "feature/sulog.h"
 #include "runtime/ksud.h"
-#include "runtime/ksud_escape.h"
 #include "sulog/event.h"
 #include "sulog/fd.h"
 
 #include "selinux/selinux.h"
 #include "selinux/sepolicy.h"
+
+#ifdef CONFIG_ARM64
+#include "arm64_bl_insn.h"
+#endif
 
 // unity build
 #include "tiny_sulog.c"
@@ -72,13 +75,23 @@
 #include "feature/sucompat.c"
 #include "feature/sulog.c"
 #include "runtime/ksud.c"
-#include "runtime/ksud_escape.c"
 
 #include "sulog/event.c"
 #include "sulog/fd.c"
 
 #include "hook/setuid_hook.c"
-#include "hook/core_hook.c"	// lsm
+
+#ifdef CONFIG_KSU_LSM_SECURITY_HOOKS
+	#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+	#include "hook/lsm_hooks_static.c"
+	#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)
+	#include "hook/lsm_hooks_list.c"
+	#else
+	#include "hook/lsm_hooks_ultralegacy.c"
+	#endif
+#else
+	#include "hook/lsm_hooks_manual.c"
+#endif
 
 #include "selinux/selinux.c"
 #include "selinux/sepolicy.c"
@@ -92,6 +105,10 @@
 #endif
 #endif /* CONFIG_KSU_TAMPER_SYSCALL_TABLE */
 
+#ifdef CONFIG_KSU_HACK_ARM64_BRANCH_LINK
+#include "hook/branch_link_hook_arm64.c"
+#endif
+
 #if defined(CONFIG_KSU_KPROBES_KSUD) && !defined(CONFIG_KSU_TAMPER_SYSCALL_TABLE)
 #include "hook/kp_ksud.c"
 #endif
@@ -103,7 +120,7 @@ struct cred* ksu_cred;
 
 extern void ksu_supercalls_init();
 
-int __init kernelsu_init(void)
+static int __init kernelsu_init(void)
 {
 #ifdef CONFIG_KSU_DEBUG
 	pr_alert("*************************************************************");
@@ -151,6 +168,14 @@ int __init kernelsu_init(void)
 	ksu_ksud_init();
 
 	ksu_file_wrapper_init();
+
+#ifdef CONFIG_KSU_TAMPER_SYSCALL_TABLE
+	ksu_syscall_table_hook_init();
+#endif
+
+#ifdef CONFIG_KSU_HACK_ARM64_BRANCH_LINK
+	ksu_branch_link_patch_init();
+#endif
 
 	return 0;
 }
