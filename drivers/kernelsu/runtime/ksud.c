@@ -366,7 +366,6 @@ static bool is_init_rc(struct file *fp)
 	return true;
 }
 
-__attribute__((cold))
 static noinline void ksu_install_rc_hook(struct file *file)
 {
 	if (!is_init(current_cred()))
@@ -426,7 +425,6 @@ static noinline void ksu_install_rc_hook(struct file *file)
 }
 
 // for sys_read kp / syscall table
-__attribute__((cold))
 static noinline void ksu_handle_sys_read_fd(unsigned int fd)
 {
 	if (likely(!ksu_vfs_read_hook))
@@ -446,7 +444,6 @@ static noinline void ksu_handle_sys_read_fd(unsigned int fd)
 #define STAT_NATIVE 0
 #define STAT_STAT64 1
 
-__attribute__((cold))
 static noinline void ksu_common_newfstat_ret(unsigned int fd_int, void **statbuf_ptr, 
 			const int type, const char *syscall_name)
 {
