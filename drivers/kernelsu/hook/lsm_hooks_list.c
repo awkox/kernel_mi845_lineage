@@ -126,7 +126,7 @@ static struct security_hook_list ksu_hooks_file_permission[] __ro_after_init = {
 static int (*selinux_setprocattr_fn)(const char *name, void *value, size_t size) __read_mostly = NULL;
 static __nocfi int ksu_setprocattr_wrapper(const char *name, void *value, size_t size)
 {
-	ksu_hide_setprocattr(name, value, size);
+	ksu_hide_setprocattr_inline(name, value, size);
 	if (likely(selinux_setprocattr_fn))
 		return selinux_setprocattr_fn(name, value, size);
 	return 0;
@@ -136,7 +136,7 @@ static __nocfi int ksu_setprocattr_wrapper(const char *name, void *value, size_t
 static int (*selinux_setprocattr_fn)(struct task_struct *p, char *name, void *value, size_t size) __read_mostly = NULL;
 static __nocfi int ksu_setprocattr_wrapper(struct task_struct *p, char *name, void *value, size_t size)
 {
-	ksu_hide_setprocattr(name, value, size);
+	ksu_hide_setprocattr_inline(name, value, size);
 	if (likely(selinux_setprocattr_fn))
 		return selinux_setprocattr_fn(p, name, value, size);
 
@@ -147,10 +147,7 @@ static __nocfi int ksu_setprocattr_wrapper(struct task_struct *p, char *name, vo
 
 /**
  *  security_setprocattr is a weird LSM on 5.4 and up, and this is normally backported
- *  down to 4.14 and 4.19. somehow this LSM is a one-shot. only the first to register
- *  is called.
- *
- *  however this is not an issue for us on 3.x as we are hijacking selinux_ops on it
+ *  down to 4.14 and 4.19. somehow this LSM is a one-shot. only the first on list is called.
  *
  */
 #define SETPROCATTR_HOOK_NAME "ksu_setprocattr"

@@ -27,7 +27,7 @@ config KSU_HACK_ARM64_BRANCH_LINK
 	  EXPERIMENTAL: provide sucompat by patching callsites by scanning kernel text and 
 	  patching bl (branch-with-link) insn. This routes call into our custom functions
 	  without proper trampolines. Theory comes from ARM64 optprobes that are still NOT 
-	  merged on mainline. (128MB limit, kernel-inbuilt-only)
+	  merged on mainline.
 	  Kprobes is required for sys_newfstat and sys_reboot hooks as this is NOT handled
 	  currently with this method.
 	  NOT recommended for pre-4.17 kernels. For those, please use KSU_TAMPER_SYSCALL_TABLE.

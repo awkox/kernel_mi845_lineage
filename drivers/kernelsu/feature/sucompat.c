@@ -78,7 +78,6 @@ static inline void ksu_sucompat_enable_branch() { } // no-op
 static inline void ksu_sucompat_disable_branch() { } // no-op
 #endif
 
-__attribute__((hot))
 static __always_inline bool is_su_allowed(const void **ptr_to_check)
 {
 #ifndef CONFIG_KSU_TAMPER_SYSCALL_TABLE
@@ -92,7 +91,7 @@ static __always_inline bool is_su_allowed(const void **ptr_to_check)
 #endif // KSU_CAN_USE_JUMP_LABEL
 #endif
 
-	if (likely(test_thread_flag(TIF_SECCOMP)))
+	if (test_thread_flag(TIF_SECCOMP))
 		return false;
 
 	// see seccomp check above
@@ -138,7 +137,7 @@ static __always_inline void ksu_sucompat_user_common(const char __user **filenam
 
 	// sugar prep
 	uintptr_t *su_p = (uintptr_t *)su;
-	uintptr_t __user *fn_p = (uintptr_t *)untagged_addr(*(char **)filename_user);
+	uintptr_t __user *fn_p = (uintptr_t __user *)untagged_addr(*(char **)filename_user);
 
 	// assert /system/bin/su\0 = 15 bytes.
 	BUILD_BUG_ON(sizeof(SU_PATH) + 1 != 16);

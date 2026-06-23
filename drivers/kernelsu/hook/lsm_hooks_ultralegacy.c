@@ -5,7 +5,7 @@ static uintptr_t selinux_ops_addr = NULL;
 static int (*orig_setprocattr) (struct task_struct *p, char *name, void *value, size_t size) __read_mostly = NULL;
 static int hook_setprocattr(struct task_struct *p, char *name, void *value, size_t size)
 {
-	ksu_hide_setprocattr(name, value, size);
+	ksu_hide_setprocattr_inline(name, value, size);
 	return orig_setprocattr(p, name, value, size);
 }
 

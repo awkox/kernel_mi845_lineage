@@ -135,6 +135,7 @@ static int __init kernelsu_init(void)
 	ksu_cred = prepare_creds();
 	if (!ksu_cred) {
 		pr_err("prepare cred failed!\n");
+		return -ENOSYS;
 	}
 
 	ksu_feature_init();

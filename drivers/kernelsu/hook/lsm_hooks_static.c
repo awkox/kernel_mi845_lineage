@@ -111,7 +111,7 @@ extern int security_setprocattr(int lsmid, const char *name, void *value, size_t
 __attribute__((hot))
 static __nocfi int ksu_setprocattr(int lsmid, const char *name, void *value, size_t size)
 {
-	ksu_hide_setprocattr(name, value, size);
+	ksu_hide_setprocattr_inline(name, value, size);
 	return security_setprocattr(lsmid, name, value, size);
 }
 
