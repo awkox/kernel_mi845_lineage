@@ -143,6 +143,10 @@
 #include <linux/lsm_hooks.h>
 #endif
 
+#ifdef CONFIG_KPROBES
+#include <linux/kprobes.h>
+#endif
+
 /**
  * Linux kernel forbids c99 restrict
  * however we can use builtin's restrict
