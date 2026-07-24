@@ -15,7 +15,7 @@ jobs:
   build:
     name: 编译内核
     permissions: { contents: write }
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         device:
@@ -35,12 +35,6 @@ jobs:
         run: |
           sudo apt-get update  -y -q
           sudo apt-get install -y -q ${{ env.PACKAGES }}
-
-      - name: 安装make4.4.1-2
-        run: |
-          curl -LSs http://ftp.debian.org/debian/pool/main/m/make-dfsg/make_4.4.1-2_amd64.deb -o make.deb
-          sudo apt-get install -y -q ./make.deb
-          rm ./make.deb
 
       - name: 同步仓库
         uses: actions/checkout@main
@@ -111,10 +105,10 @@ jobs:
           device.name1=${{ matrix.device }}
           do.devicecheck=1
           '; }
-          ramdisk_compression=auto
-          patch_vbmeta_flag=auto
-          is_slot_device=auto
-          block=auto
+          BLOCK=auto;
+          IS_SLOT_DEVICE=auto;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
           . tools/ak3-core.sh
           split_boot
           flash_boot
