@@ -10,13 +10,13 @@ ifeq ($(shell grep -A1 "void security_add_hooks" $(srctree)/include/linux/lsm_ho
 CFLAGS_ksu.o += -DKSU_COMPAT_SECURITY_ADD_HOOKS_V2
 endif
 
-ifeq ($(shell grep -q "^struct security_operations selinux_ops" $(srctree)/security/selinux/hooks.c; echo $$?),0)
-CFLAGS_ksu.o += -DKSU_HAS_EXPORTED_SELINUX_OPS
-endif
-
 # see security_delete_hooks
 ifeq ($(shell grep -A5 "^struct security_hook_list" $(srctree)/include/linux/lsm_hooks.h 2>/dev/null | grep -q "struct hlist_node" 2>/dev/null; echo $$?),0)
 CFLAGS_ksu.o += -DKSU_COMPAT_SECURITY_DELETE_HOOKS_HLIST
+endif
+
+ifeq ($(shell grep -q "^struct security_operations selinux_ops" $(srctree)/security/selinux/hooks.c; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_HAS_EXPORTED_SELINUX_OPS
 endif
 
 ifeq ($(shell grep -q " current_sid(void)" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
@@ -61,6 +61,7 @@ endif
 
 CFLAGS_ksu.o += $(call cc-option, -Wno-declaration-after-statement)
 CFLAGS_ksu.o += $(call cc-option, -Wno-implicit-function-declaration)
+CFLAGS_ksu.o += $(call cc-option, -Wno-missing-prototypes)
 CFLAGS_ksu.o += $(call cc-option, -Wno-strict-prototypes)
 CFLAGS_ksu.o += $(call cc-option, -Wno-int-conversion)
 CFLAGS_ksu.o += $(call cc-option, -Wno-int-to-pointer-cast)
@@ -82,12 +83,22 @@ CFLAGS_ksu.o += $(call cc-option, -Wframe-larger-than=1024)
 # to make sure we can use builtins
 CFLAGS_REMOVE_ksu.o += -fno-builtin
 
+# a little respect to kbuild
+ifeq ($(CONFIG_CC_OPTIMIZE_FOR_SIZE),y)
+CFLAGS_REMOVE_ksu.o += -Oz
+CFLAGS_REMOVE_ksu.o += -Os
+CFLAGS_ksu.o += -O2
+else
+CFLAGS_ksu.o += -O3
+endif
+
 ifneq ($(CONFIG_KSU_DEBUG),y)
 # strip, remove tracing / profiling
 # comment out if proper backtrace is needed
-CFLAGS_ksu.o += -O3
 CFLAGS_ksu.o += -g0 -fno-unwind-tables -fno-asynchronous-unwind-tables -fomit-frame-pointer
 CFLAGS_ksu.o += $(call cc-option, -momit-leaf-frame-pointer)
+
+# no profiling
 CFLAGS_REMOVE_ksu.o = $(CC_FLAGS_FTRACE)
 CFLAGS_REMOVE_ksu.o += -pg
 
@@ -95,5 +106,3 @@ CFLAGS_REMOVE_ksu.o += -pg
 CFLAGS_ksu.o += -fno-stack-protector -fno-stack-check
 CFLAGS_REMOVE_ksu.o += -fsanitize=shadow-call-stack
 endif # CONFIG_KSU_DEBUG
-
-# Keep a new line here!! Because someone may append config
