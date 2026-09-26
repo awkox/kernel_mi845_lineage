@@ -114,29 +114,30 @@ ssize_t zcomp_available_show(const char *comp, char *buf, ssize_t at)
 
 struct zcomp_strm *zcomp_stream_get(struct zcomp *comp)
 {
-	for (;;) {
-		struct zcomp_strm *zstrm = raw_cpu_ptr(comp->stream);
-
-		/*
-		 * Inspired by zswap
-		 *
-		 * stream is returned with ->mutex locked which prevents
-		 * cpu_dead() from releasing this stream under us, however
-		 * there is still a race window between raw_cpu_ptr() and
-		 * mutex_lock(), during which we could have been migrated
-		 * from a CPU that has already destroyed its stream.  If
-		 * so then unlock and re-try on the current CPU.
-		 */
-		mutex_lock(&zstrm->lock);
-		if (likely(zstrm->buffer))
-			return zstrm;
-		mutex_unlock(&zstrm->lock);
-	}
+	/*
+	 * The stream must be picked with preemption disabled, and nothing
+	 * on the compress/decompress path may sleep.  On this kernel
+	 * ->make_request is reached with preemption already disabled:
+	 * block/blk-mq.h:queue_run() wraps the dispatch of a plugged
+	 * request list in preempt_disable()/preempt_enable(), so the swap
+	 * reclaim path reaches us inside preempt_disable() as well.
+	 *
+	 * A mutex here would silently do nothing: __schedule() bails out
+	 * at its "if (in_atomic()) __schedule_bug()" check, so mutex_lock()
+	 * returns *without* the lock and we would go on using a buffer that
+	 * another task is using concurrently.
+	 *
+	 * No extra locking is needed: only a task running on this very CPU
+	 * can obtain this CPU's stream, so a running task and the teardown
+	 * in zcomp_cpu_dead() can never overlap.  That is also why
+	 * zstrm->buffer needs no NULL check here.
+	 */
+	return get_cpu_ptr(comp->stream);
 }
 
 void zcomp_stream_put(struct zcomp_strm *zstrm)
 {
-	mutex_unlock(&zstrm->lock);
+	put_cpu_ptr(zstrm);
 }
 
 int zcomp_compress(struct zcomp *comp, struct zcomp_strm *zstrm,
@@ -186,15 +187,13 @@ int zcomp_cpu_dead(unsigned int cpu, struct hlist_node *node)
 	struct zcomp *comp = hlist_entry(node, struct zcomp, node);
 	struct zcomp_strm *zstrm = per_cpu_ptr(comp->stream, cpu);
 
-	mutex_lock(&zstrm->lock);
 	zcomp_strm_free(comp, zstrm);
-	mutex_unlock(&zstrm->lock);
 	return 0;
 }
 
 static int zcomp_init(struct zcomp *comp, struct zcomp_params *params)
 {
-	int ret, cpu;
+	int ret;
 
 	comp->stream = alloc_percpu(struct zcomp_strm);
 	if (!comp->stream)
@@ -205,9 +204,7 @@ static int zcomp_init(struct zcomp *comp, struct zcomp_params *params)
 	if (ret)
 		goto cleanup;
 
-	for_each_possible_cpu(cpu)
-		mutex_init(&per_cpu_ptr(comp->stream, cpu)->lock);
-
+	/* the per-CPU streams are set up by the cpuhotplug up callback */
 	ret = cpuhp_state_add_instance(CPUHP_ZCOMP_PREPARE, &comp->node);
 	if (ret < 0)
 		goto cleanup;

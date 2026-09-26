@@ -38,7 +38,6 @@ struct zcomp_ctx {
 };
 
 struct zcomp_strm {
-	struct mutex lock;
 	/* compression buffer */
 	void *buffer;
 	/* local copy of handle memory */
