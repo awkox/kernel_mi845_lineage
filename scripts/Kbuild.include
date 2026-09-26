@@ -9,6 +9,10 @@ include scripts/Makefile.include
 dot-target = $(dir $@).$(notdir $@)
 
 ###
+# Name of target with a '.tmp_' as filename prefix. foo/bar.o => foo/.tmp_bar.o
+tmp-target = $(dir $@).tmp_$(notdir $@)
+
+###
 # The temporary file to save gcc -MD generated dependencies must not
 # contain a comma
 depfile = $(subst $(comma),_,$(dot-target).d)
@@ -22,8 +26,26 @@ basetarget = $(basename $(notdir $@))
 baseprereq = $(basename $(notdir $<))
 
 ###
+# real prerequisites without phony targets
+real-prereqs = $(filter-out $(PHONY), $^)
+
+###
 # Escape single quote for use in echo statements
 escsq = $(subst $(squote),'\$(squote)',$1)
+
+###
+# Quote a string to pass it to C files. foo => '"foo"'
+stringify = $(squote)$(quote)$1$(quote)$(squote)
+
+###
+# Read a file, replacing newlines with spaces
+#
+# Make 4.2 or later can read a file by using its builtin function.
+ifneq ($(filter-out 4.0 4.1, $(MAKE_VERSION)),)
+read-file = $(subst $(newline),$(space),$(file < $1))
+else
+read-file = $(shell cat $1 2>/dev/null)
+endif
 
 ###
 # Easy method for doing a status message
@@ -35,28 +57,25 @@ kecho := $($(quiet)kecho)
 ###
 # filechk is used to check if the content of a generated file is updated.
 # Sample usage:
-# define filechk_sample
-#	echo $KERNELRELEASE
-# endef
-# version.h : Makefile
+#
+# filechk_sample = echo $(KERNELRELEASE)
+# version.h: FORCE
 #	$(call filechk,sample)
+#
 # The rule defined shall write to stdout the content of the new file.
 # The existing file will be compared with the new one.
 # - If no file exist it is created
 # - If the content differ the new file is used
 # - If they are equal no change, and no timestamp update
-# - stdin is piped in from the first prerequisite ($<) so one has
-#   to specify a valid file as first prerequisite (often the kbuild file)
 define filechk
-	$(Q)set -e;				\
-	$(kecho) '  CHK     $@';		\
-	mkdir -p $(dir $@);			\
-	$(filechk_$(1)) < $< > $@.tmp;		\
-	if [ -r $@ ] && cmp -s $@ $@.tmp; then	\
-		rm -f $@.tmp;			\
-	else					\
-		$(kecho) '  UPD     $@';	\
-		mv -f $@.tmp $@;		\
+	$(check-FORCE)
+	$(Q)set -e;						\
+	mkdir -p $(dir $@);					\
+	trap "rm -f $(tmp-target)" EXIT;			\
+	{ $(filechk_$(1)); } > $(tmp-target);			\
+	if [ ! -r $@ ] || ! cmp -s $@ $(tmp-target); then	\
+		$(kecho) '  UPD     $@';			\
+		mv -f $(tmp-target) $@;				\
 	fi
 endef
 
@@ -276,10 +295,41 @@ flags = $(foreach o,$($(1)),$(if $(filter -I%,$(o)),$(call addtree,$(o)),$(o)))
 # echo command.
 # Short version is used, if $(quiet) equals `quiet_', otherwise full one.
 echo-cmd = $(if $($(quiet)cmd_$(1)),\
-	echo '  $(call escsq,$($(quiet)cmd_$(1)))$(echo-why)';)
+	echo '  $(call escsq,$($(quiet)cmd_$(1))$(why))';)
+
+# print log
+# If quiet is "silent_", print nothing and sink stdout
+# If quiet is "quiet_", print the short log line
+#
+# Note: unlike upstream, there is no $(log_print) yet. It duplicates the
+# full command line, which $(cmd) already echoes at V>0. Introduce it
+# together with the V>0 rework in a later commit.
+silent_log_print = exec >/dev/null;
+ quiet_log_print = $(if $(quiet_cmd_$1), echo '  $(call escsq,$(quiet_cmd_$1)$(why))';)
+
+# Delete the target on interruption
+#
+# GNU Make automatically deletes the target if it has already been changed by
+# the interrupted recipe. So, you can safely stop the build by Ctrl-C (Make
+# will delete incomplete targets), and resume it later.
+#
+# However, this does not work when the stderr is piped to another program, like
+#  $ make >&2 | tee log
+# Make dies with SIGPIPE before cleaning the targets.
+#
+# To address it, we clean the target in signal traps.
+#
+# Make deletes the target when it catches SIGHUP, SIGINT, SIGQUIT, SIGTERM.
+# So, we cover them, and also SIGPIPE just in case.
+#
+# Of course, this is unneeded for phony targets.
+delete-on-interrupt = \
+	$(if $(filter-out $(PHONY), $@), \
+		$(foreach sig, HUP INT QUIT TERM PIPE, \
+			trap 'rm -f $@; trap - $(sig); kill -s $(sig) $$$$' $(sig);))
 
 # printing commands
-cmd = @$(echo-cmd) $(cmd_$(1))
+cmd = @$(echo-cmd) $(delete-on-interrupt) $(cmd_$(1))
 
 # Add $(obj)/ for paths that are not absolute
 objectify = $(foreach o,$(1),$(if $(filter /%,$(o)),$(o),$(obj)/$(o)))
@@ -295,10 +345,14 @@ objectify = $(foreach o,$(1),$(if $(filter /%,$(o)),$(o),$(obj)/$(o)))
 ifneq ($(KBUILD_NOCMDDEP),1)
 # Check if both arguments are the same including their order. Result is empty
 # string if equal. User may override this check using make KBUILD_NOCMDDEP=1
-arg-check = $(filter-out $(subst $(space),$(space_escape),$(strip $(cmd_$@))), \
+# If the target does not exist, the *.cmd file should not be included so
+# $(cmd_$@) gets empty. Then, target will be built even if $(newer-prereqs)
+# happens to become empty.
+cmd-check = $(filter-out $(subst $(space),$(space_escape),$(strip $(cmd_$@))), \
                          $(subst $(space),$(space_escape),$(strip $(cmd_$1))))
 else
-arg-check = $(if $(strip $(cmd_$@)),,1)
+# We still need to detect missing targets.
+cmd-check = $(if $(strip $(cmd_$@)),,1)
 endif
 
 # Replace >$< with >$$< to preserve $ when reloading the .cmd file
@@ -311,16 +365,33 @@ make-cmd = $(call escsq,$(subst $(pound),$$(pound),$(subst $$,$$$$,$(cmd_$(1))))
 
 # Find any prerequisites that is newer than target or that does not exist.
 # PHONY targets skipped in both cases.
-any-prereq = $(filter-out $(PHONY),$?) $(filter-out $(PHONY) $(wildcard $^),$^)
+# If there is no prerequisite other than phony targets, $(newer-prereqs) becomes
+# empty even if the target does not exist. cmd-check saves this corner case.
+newer-prereqs = $(filter-out $(PHONY),$?) $(filter-out $(PHONY) $(wildcard $^),$^)
+
+# It is a typical mistake to forget the FORCE prerequisite. Check it here so
+# no more breakage will slip in.
+check-FORCE = $(if $(filter FORCE, $^),,$(warning FORCE prerequisite is missing))
+
+# Note: $(check-FORCE) is deliberately not part of $(if-changed-cond) yet.
+# Unlike upstream, this tree's pattern rules ($(obj)/%.o etc.) do not carry a
+# FORCE prerequisite, so including it here would emit one warning per object
+# file. It is only used by filechk for now; wire it in once C6 adds FORCE
+# everywhere.
+#
+# $(strip) is required: $(newer-prereqs) is written as two $(filter-out ...)
+# joined by a literal space, so it expands to a lone " " when both halves are
+# empty. $(if) does not strip, so without this every target would rebuild.
+if-changed-cond = $(strip $(newer-prereqs)$(cmd-check))
 
 # Execute command if command has changed or prerequisite(s) are updated.
-if_changed = $(if $(strip $(any-prereq) $(arg-check)),                       \
+if_changed = $(if $(if-changed-cond),                                      \
 	@set -e;                                                             \
 	$(echo-cmd) $(cmd_$(1));                                             \
 	printf '%s\n' 'cmd_$@ := $(make-cmd)' > $(dot-target).cmd, @:)
 
 # Execute the command and also postprocess generated .d dependencies file.
-if_changed_dep = $(if $(strip $(any-prereq) $(arg-check) ),                  \
+if_changed_dep = $(if $(if-changed-cond),                                  \
 	@set -e;                                                             \
 	$(cmd_and_fixdep), @:)
 
@@ -362,7 +433,7 @@ endif
 # Usage: $(call if_changed_rule,foo)
 # Will check if $(cmd_foo) or any of the prerequisites changed,
 # and if so will execute $(rule_foo).
-if_changed_rule = $(if $(strip $(any-prereq) $(arg-check) ),                 \
+if_changed_rule = $(if $(if-changed-cond),                                   \
 	@set -e;                                                             \
 	$(rule_$(1)), @:)
 
@@ -385,12 +456,12 @@ if_changed_rule = $(if $(strip $(any-prereq) $(arg-check) ),                 \
 # (5) No dir/.target.cmd file (used to store command line)
 # (6) No dir/.target.cmd file and target not listed in $(targets)
 #     This is a good hint that there is a bug in the kbuild file
-ifeq ($(KBUILD_VERBOSE),2)
-why =                                                                        \
+ifneq ($(findstring 2, $(KBUILD_VERBOSE)),)
+_why =                                                                        \
     $(if $(filter $@, $(PHONY)),- due to target is PHONY,                    \
         $(if $(wildcard $@),                                                 \
-            $(if $(strip $(any-prereq)),- due to: $(any-prereq),             \
-                $(if $(arg-check),                                           \
+            $(if $(strip $(newer-prereqs)),- due to: $(newer-prereqs),      \
+                $(if $(cmd-check),                                           \
                     $(if $(cmd_$@),- due to command line change,             \
                         $(if $(filter $@, $(targets)),                       \
                             - due to missing .cmd file,                      \
@@ -403,7 +474,7 @@ why =                                                                        \
          )                                                                   \
      )
 
-echo-why = $(call escsq, $(strip $(why)))
+why = $(space)$(strip $(_why))
 endif
 
 ###############################################################################

@@ -23,7 +23,7 @@ OS := $(shell uname -s)
 # features.
 SHELL := /bin/bash
 
-filechk_gen_header = $<
+filechk_gen_header = $(<)
 
 core-y			+= $(ARCH_DIR)/kernel/		\
 			   $(ARCH_DIR)/drivers/		\
@@ -158,11 +158,11 @@ define filechk_gen-asm-offsets
          echo " *"; \
          echo " */"; \
          echo ""; \
-         sed -ne "/^->/{s:^->\([^ ]*\) [\$$#]*\([^ ]*\) \(.*\):#define \1 \2 /* \3 */:; s:->::; p;}"; \
+         sed -ne "/^->/{s:^->\([^ ]*\) [\$$#]*\([^ ]*\) \(.*\):#define \1 \2 /* \3 */:; s:->::; p;}" < $(<); \
          echo ""; )
 endef
 
-include/generated/user_constants.h: $(HOST_DIR)/um/user-offsets.s
+include/generated/user_constants.h: $(HOST_DIR)/um/user-offsets.s FORCE
 	$(call filechk,gen-asm-offsets)
 
 export SUBARCH USER_CFLAGS CFLAGS_NO_HARDENING OS DEV_NULL_PATH
