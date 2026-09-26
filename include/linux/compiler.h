@@ -375,6 +375,11 @@ unsigned long read_word_at_a_time(const void *addr)
 #define __must_check
 #endif
 
+/* Mark a case as deliberately falling through, suppress -Wimplicit-fallthrough */
+#ifndef fallthrough
+#define fallthrough __attribute__((__fallthrough__))
+#endif
+
 #ifndef CONFIG_ENABLE_MUST_CHECK
 #undef __must_check
 #define __must_check

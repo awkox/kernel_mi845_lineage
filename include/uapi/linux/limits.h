@@ -17,4 +17,8 @@
 
 #define RTSIG_MAX	  32
 
+#ifndef UINTPTR_MAX
+#define UINTPTR_MAX		((unsigned long)~0UL)
+#endif
+
 #endif
