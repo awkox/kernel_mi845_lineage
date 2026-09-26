@@ -91,6 +91,49 @@ as a library (lzo, lzo-rle, lz4, lz4hc, deflate, 842, zstd). Which
 algorithm is used by default is chosen at build time by
 CONFIG_ZRAM_DEF_COMP.
 
+The algorithm_params device attribute tunes the selected backend. Like
+comp_algorithm it can only be used before the device is initialised,
+i.e. before disksize is set. Writing an empty string, or not writing the
+attribute at all, leaves every parameter at the backend default.
+
+Parameters:
+	algo=<algorithm>
+		Same as writing the name to comp_algorithm, but here it can
+		be combined with the parameters below. The parameters are
+		validated against this algorithm, and it is only selected
+		once all of them have been accepted.
+	level=<int>
+		Compression level, meaning depends on the algorithm:
+		lz4	acceleration, 1 is the default and the slowest
+			setting, higher is faster and compresses less
+		lz4hc	compression level, 3 (fastest) to 16 (best)
+		zstd	compression level, as reported by
+			zstd_min_clevel() and zstd_max_clevel()
+		deflate	compression level, 1 (fastest) to 9 (best), or
+			-1 for the library default
+		An unsupported level is rejected instead of being
+		silently clamped by the library.
+	deflate.winbits=<int>
+		Window size for deflate, -15 to 15. Negative values select
+		a raw deflate stream without the zlib header and checksum,
+		which is the default (-11).
+	dict=<path>
+		Load a compression dictionary from a regular file of at
+		most 1 MiB. A dictionary is most useful with zstd, where
+		it can be trained on representative data with
+		"zstd --train" and noticeably improves the compression
+		ratio of small, repetitive pages such as the 4 KiB pages
+		zram stores. lz4 and lz4hc accept one as well.
+
+Examples:
+	# select zstd at compression level 19
+	echo 'algo=zstd level=19' > /sys/block/zram0/algorithm_params
+
+	# use a trained dictionary, fastest available zstd level
+	echo 'algo=zstd level=3 dict=/data/local/tmp/zram.dict' \
+		> /sys/block/zram0/algorithm_params
+	echo 4G > /sys/block/zram0/disksize
+
 4) Set Disksize
 Set disk size by writing the value to sysfs node 'disksize'.
 The value can be either in bytes or you can use mem suffixes.
@@ -167,6 +210,8 @@ writeback_limit   	WO	specifies the maximum amount of write IO zram can
 writeback_limit_enable  RW	show and set writeback_limit feature
 max_comp_streams  	RW	the number of possible concurrent compress operations
 comp_algorithm    	RW	show and change the compression algorithm
+algorithm_params  	WO	set the compression algorithm and its parameters,
+				must be written before the device is initialized
 compact           	WO	trigger memory compaction
 debug_stat        	RO	this file is used for zram debugging purposes
 backing_dev	  	RW	set up backend storage for zram to write out

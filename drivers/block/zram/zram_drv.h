@@ -34,6 +34,9 @@
  */
 #define ZRAM_MAX_ALGO_NAME_SZ	128
 
+/* Upper bound on the dictionary accepted by /sys/block/zramX/algorithm_params */
+#define ZRAM_DICT_MAX_SIZE	(1024 * 1024)
+
 /*
  * ZRAM is mainly used for memory efficiency so we want to keep memory
  * footprint small and thus squeeze size and zram pageflags into a flags

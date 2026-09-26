@@ -33,6 +33,22 @@
 #include <linux/sysfs.h>
 #include <linux/debugfs.h>
 #include <linux/cpuhotplug.h>
+#include <linux/ctype.h>
+#include <linux/fs.h>
+#include <linux/file.h>
+#include <linux/fcntl.h>
+#ifdef CONFIG_ZRAM_BACKEND_DEFLATE
+#include <linux/zlib.h>
+#endif
+#if defined(CONFIG_ZRAM_BACKEND_LZ4) || defined(CONFIG_ZRAM_BACKEND_LZ4HC)
+#include <linux/lz4.h>
+#endif
+#ifdef CONFIG_ZRAM_BACKEND_ZSTD
+#include <linux/zstd.h>
+#endif
+#ifndef Z_DEFAULT_COMPRESSION
+#define Z_DEFAULT_COMPRESSION	(-1)
+#endif
 
 #include "zram_drv.h"
 
@@ -1029,23 +1045,35 @@ static ssize_t comp_algorithm_show(struct device *dev,
 	return sz;
 }
 
-static ssize_t comp_algorithm_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t len)
+static int __comp_algorithm_store(struct zram *zram, const char *buf)
 {
-	struct zram *zram = dev_to_zram(dev);
-	char compressor[ARRAY_SIZE(zram->compressor)];
+	char compressor[ZRAM_MAX_ALGO_NAME_SZ];
+	const char *alg;
 	size_t sz;
+
+	sz = strlen(buf);
+	if (sz >= ZRAM_MAX_ALGO_NAME_SZ)
+		return -E2BIG;
 
 	strlcpy(compressor, buf, sizeof(compressor));
 	/* ignore trailing newline */
 	sz = strlen(compressor);
 	if (sz > 0 && compressor[sz - 1] == '\n')
-		compressor[sz - 1] = 0x00;
-	if (sz >= ZRAM_MAX_ALGO_NAME_SZ)
+		compressor[sz - 1] = '\0';
+
+	alg = zcomp_lookup_backend_name(compressor);
+	if (!alg)
 		return -EINVAL;
 
-	if (!zcomp_lookup_backend_name(compressor))
-		return -EINVAL;
+	strcpy(zram->compressor, alg);
+	return 0;
+}
+
+static ssize_t comp_algorithm_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	struct zram *zram = dev_to_zram(dev);
+	int ret;
 
 	down_write(&zram->init_lock);
 	if (init_done(zram)) {
@@ -1054,9 +1082,272 @@ static ssize_t comp_algorithm_store(struct device *dev,
 		return -EBUSY;
 	}
 
-	strcpy(zram->compressor, compressor);
+	ret = __comp_algorithm_store(zram, buf);
 	up_write(&zram->init_lock);
-	return len;
+	return ret ? ret : len;
+}
+
+/*
+ * Kernel 4.9 keeps next_arg() private to kernel/params.c, so carry a copy
+ * for parsing the algorithm_params syntax below.
+ */
+static char *zram_next_arg(char *args, char **param, char **val)
+{
+	unsigned int i, equals = 0;
+	int in_quote = 0, quoted = 0;
+	char *next;
+
+	if (*args == '"') {
+		args++;
+		in_quote = 1;
+		quoted = 1;
+	}
+
+	for (i = 0; args[i]; i++) {
+		if (isspace(args[i]) && !in_quote)
+			break;
+		if (equals == 0) {
+			if (args[i] == '=')
+				equals = i;
+		}
+		if (args[i] == '"')
+			in_quote = !in_quote;
+	}
+
+	*param = args;
+	if (!equals)
+		*val = NULL;
+	else {
+		args[equals] = '\0';
+		*val = args + equals + 1;
+
+		/* Don't include quotes in value. */
+		if (**val == '"') {
+			(*val)++;
+			if (args[i-1] == '"')
+				args[i-1] = '\0';
+		}
+	}
+	if (quoted && args[i-1] == '"')
+		args[i-1] = '\0';
+
+	if (args[i]) {
+		args[i] = '\0';
+		next = args + i + 1;
+	} else
+		next = args + i;
+
+	/* Chew up trailing spaces. */
+	return skip_spaces(next);
+}
+
+/*
+ * Read a compression dictionary into a freshly allocated buffer.  The
+ * backend only references it, and this kernel has no kernel_read_file().
+ */
+static ssize_t zram_read_dict(const char *path, void **buf)
+{
+	void *dict;
+	struct file *file;
+	loff_t pos = 0, size;
+	ssize_t sz = 0, ret;
+
+	file = filp_open(path, O_RDONLY, 0);
+	if (IS_ERR(file))
+		return PTR_ERR(file);
+
+	if (!S_ISREG(file_inode(file)->i_mode)) {
+		ret = -EINVAL;
+		goto out_fput;
+	}
+
+	size = file_inode(file)->i_size;
+	if (size <= 0 || size > ZRAM_DICT_MAX_SIZE) {
+		pr_err("dictionary \"%s\" has an unsupported size\n", path);
+		ret = -EFBIG;
+		goto out_fput;
+	}
+
+	dict = vzalloc(size);
+	if (!dict) {
+		ret = -ENOMEM;
+		goto out_fput;
+	}
+
+	while (pos < size) {
+		ret = kernel_read(file, pos, (char *)dict + pos, size - pos);
+		if (ret < 0)
+			goto out_vfree;
+		if (!ret)
+			break;
+		sz += ret;
+		pos += ret;
+	}
+	if (sz != size) {
+		pr_err("dictionary \"%s\" changed while being read\n", path);
+		ret = -EIO;
+		goto out_vfree;
+	}
+
+	*buf = dict;
+	fput(file);
+	return sz;
+
+out_vfree:
+	vfree(dict);
+out_fput:
+	fput(file);
+	return ret;
+}
+
+static void comp_params_reset(struct zram *zram)
+{
+	vfree(zram->params.dict);
+	zram->params.dict = NULL;
+	zram->params.dict_sz = 0;
+	zram->params.level = ZCOMP_PARAM_NOT_SET;
+	zram->params.deflate.winbits = ZCOMP_PARAM_NOT_SET;
+}
+
+static int comp_params_store(struct zram *zram, s32 level,
+		const char *dict_path, s32 winbits)
+{
+	ssize_t sz = 0;
+
+	comp_params_reset(zram);
+
+	if (dict_path) {
+		sz = zram_read_dict(dict_path, &zram->params.dict);
+		if (sz < 0)
+			return (int)sz;
+	}
+
+	zram->params.dict_sz = sz;
+	zram->params.level = level;
+	zram->params.deflate.winbits = winbits;
+	return 0;
+}
+
+/* Backends which take a compression level, the rest silently drop it. */
+static bool zram_algo_has_level(const char *alg)
+{
+	return !strcmp(alg, "lz4") || !strcmp(alg, "lz4hc") ||
+		!strcmp(alg, "zstd") || !strcmp(alg, "deflate");
+}
+
+static bool zram_level_valid(const char *alg, s32 level)
+{
+	/*
+	 * Z_DEFAULT_COMPRESSION (-1) asks the backend for its own default
+	 * and is meaningless everywhere but deflate.
+	 */
+	if (level == Z_DEFAULT_COMPRESSION)
+		return !strcmp(alg, "deflate");
+#ifdef CONFIG_ZRAM_BACKEND_DEFLATE
+	if (!strcmp(alg, "deflate"))
+		return level >= Z_BEST_SPEED && level <= Z_BEST_COMPRESSION;
+#endif
+#ifdef CONFIG_ZRAM_BACKEND_LZ4
+	if (!strcmp(alg, "lz4"))
+		return level >= LZ4_ACCELERATION_DEFAULT;
+#endif
+#ifdef CONFIG_ZRAM_BACKEND_LZ4HC
+	if (!strcmp(alg, "lz4hc"))
+		return level >= LZ4HC_MIN_CLEVEL && level <= LZ4HC_MAX_CLEVEL;
+#endif
+#ifdef CONFIG_ZRAM_BACKEND_ZSTD
+	if (!strcmp(alg, "zstd"))
+		return level >= zstd_min_clevel() && level <= zstd_max_clevel();
+#endif
+	return false;
+}
+
+static ssize_t algorithm_params_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	s32 level = ZCOMP_PARAM_NOT_SET, winbits = ZCOMP_PARAM_NOT_SET;
+	char algo[ZRAM_MAX_ALGO_NAME_SZ];
+	const char *alg, *dict_path = NULL;
+	bool level_set = false, winbits_set = false, algo_set = false;
+	struct zram *zram = dev_to_zram(dev);
+	char *args, *param, *val;
+	int ret;
+
+	algo[0] = '\0';
+
+	args = skip_spaces((char *)buf);
+	while (*args) {
+		args = zram_next_arg(args, &param, &val);
+
+		if (!val || !*val)
+			return -EINVAL;
+
+		if (!strcmp(param, "level")) {
+			ret = kstrtoint(val, 10, &level);
+			if (ret)
+				return ret;
+			level_set = true;
+			continue;
+		}
+
+		if (!strcmp(param, "algo")) {
+			if (strlen(val) >= sizeof(algo))
+				return -E2BIG;
+			strlcpy(algo, val, sizeof(algo));
+			/* ignore trailing newline */
+			ret = strlen(algo);
+			if (ret > 0 && algo[ret - 1] == '\n')
+				algo[ret - 1] = '\0';
+			if (!zcomp_lookup_backend_name(algo))
+				return -EINVAL;
+			algo_set = true;
+			continue;
+		}
+
+		if (!strcmp(param, "dict")) {
+			dict_path = val;
+			continue;
+		}
+
+		if (!strcmp(param, "deflate.winbits")) {
+			ret = kstrtoint(val, 10, &winbits);
+			if (ret)
+				return ret;
+			winbits_set = true;
+			continue;
+		}
+
+		return -EINVAL;
+	}
+
+	down_write(&zram->init_lock);
+	if (init_done(zram)) {
+		up_write(&zram->init_lock);
+		pr_info("Can't change algorithm params for initialized device\n");
+		return -EBUSY;
+	}
+
+	alg = algo_set ? zcomp_lookup_backend_name(algo) : zram->compressor;
+
+	if (level_set &&
+	    (!zram_algo_has_level(alg) || !zram_level_valid(alg, level))) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (winbits_set &&
+	    (strcmp(alg, "deflate") || winbits < -15 || winbits > 15)) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (algo_set)
+		strcpy(zram->compressor, alg);
+
+	ret = comp_params_store(zram, level, dict_path, winbits);
+out:
+	up_write(&zram->init_lock);
+	return ret ? ret : len;
 }
 
 static ssize_t compact_store(struct device *dev,
@@ -1776,8 +2067,6 @@ static ssize_t disksize_store(struct device *dev,
 		goto out_unlock;
 	}
 
-	zram->params.level = ZCOMP_PARAM_NOT_SET;
-	zram->params.deflate.winbits = ZCOMP_PARAM_NOT_SET;
 	comp = zcomp_create(zram->compressor, &zram->params);
 	if (IS_ERR(comp)) {
 		pr_err("Cannot initialise %s compressing backend\n",
@@ -1878,6 +2167,7 @@ static DEVICE_ATTR_WO(mem_used_max);
 static DEVICE_ATTR_WO(idle);
 static DEVICE_ATTR_RW(max_comp_streams);
 static DEVICE_ATTR_RW(comp_algorithm);
+static DEVICE_ATTR_WO(algorithm_params);
 #ifdef CONFIG_ZRAM_WRITEBACK
 static DEVICE_ATTR_RW(backing_dev);
 static DEVICE_ATTR_WO(writeback);
@@ -1895,6 +2185,7 @@ static struct attribute *zram_disk_attrs[] = {
 	&dev_attr_idle.attr,
 	&dev_attr_max_comp_streams.attr,
 	&dev_attr_comp_algorithm.attr,
+	&dev_attr_algorithm_params.attr,
 #ifdef CONFIG_ZRAM_WRITEBACK
 	&dev_attr_backing_dev.attr,
 	&dev_attr_writeback.attr,
@@ -2001,6 +2292,7 @@ static int zram_add(void)
 	add_disk(zram->disk);
 
 	strlcpy(zram->compressor, default_compressor, sizeof(zram->compressor));
+	comp_params_reset(zram);
 
 	zram_debugfs_register(zram);
 	pr_info("Added device: %s\n", zram->disk->disk_name);
@@ -2064,6 +2356,7 @@ static int zram_remove(struct zram *zram)
 	 * anything allocated with disksize_store()
 	 */
 	zram_reset_device(zram);
+	comp_params_reset(zram);
 
 	blk_cleanup_queue(zram->disk->queue);
 	put_disk(zram->disk);
