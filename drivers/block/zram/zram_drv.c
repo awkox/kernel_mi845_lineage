@@ -136,7 +136,7 @@ static size_t zram_get_obj_size(struct zram *zram, u32 index)
 static void zram_set_obj_size(struct zram *zram,
 					u32 index, size_t size)
 {
-	u32 flags = zram->table[index].attr.flags >> ZRAM_FLAG_SHIFT;
+	unsigned long flags = zram->table[index].attr.flags >> ZRAM_FLAG_SHIFT;
 
 	zram->table[index].attr.flags = (flags << ZRAM_FLAG_SHIFT) | size;
 }
@@ -2153,9 +2153,10 @@ static void destroy_devices(void)
 
 static int __init zram_init(void)
 {
+	struct zram_table_entry zram_te;
 	int ret;
 
-	BUILD_BUG_ON(__NR_ZRAM_PAGEFLAGS > sizeof(u32) * 8);
+	BUILD_BUG_ON(__NR_ZRAM_PAGEFLAGS > sizeof(zram_te.attr.flags) * 8);
 	/*
 	 * The table holds one entry per disk page, so its size is charged
 	 * directly against the memory zram is meant to save. Keep it at two

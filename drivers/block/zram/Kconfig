@@ -1,6 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0
 config ZRAM
 	tristate "Compressed RAM block device support"
-	depends on BLOCK && SYSFS && ZSMALLOC
+	depends on BLOCK && SYSFS && MMU
+	select ZSMALLOC
 	help
 	  Creates virtual block devices called /dev/zramX (X = 0, 1, ...).
 	  Pages written to these disks are compressed and stored in memory
@@ -128,7 +130,9 @@ config ZRAM_MEMORY_TRACKING
 
 # NOTE: ZRAM_MULTI_COMP (multiple compression streams / recompression) is
 # deliberately not offered yet. The framework plumbing in zcomp.[ch] is in
-# place, but the zram driver side (per-slot comp priority, the
-# /sys/block/zramX/algorithm_params and recomp_algorithm interfaces and the
-# recompress_store writeback path) has not been ported, so enabling it today
-# would silently do nothing. Add the symbol back together with that work.
+# place and the comp priority pageflags are reserved in struct
+# zram_table_entry, but the zram driver side (per-slot comp priority
+# accessors, the /sys/block/zramX/algorithm_params and recomp_algorithm
+# interfaces and the recompress_store post-processing path) has not been
+# ported, so enabling it today would silently do nothing. Add the symbol
+# back together with that work.

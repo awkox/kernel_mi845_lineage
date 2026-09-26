@@ -13,6 +13,15 @@
  */
 #define ZSTD_DEF_LEVEL	3
 
+/*
+ * Unlike upstream, this backend has no C/D dictionary support, so the
+ * zstd_custom_mem allocator, zstd_create_{c,d}dict_byreference() and the
+ * zstd_{compress,decompress}_using_{c,d}dict() paths are all left out.
+ * This kernel ships zstd 1.3.x, which has neither the lowercase aliases nor
+ * zstd_create_cdict_byreference(), and there is no kernel_read_file_from_path()
+ * to load a dictionary from, so params->dict_sz is always 0 here.
+ */
+
 struct zstd_ctx {
 	ZSTD_CCtx *cctx;
 	ZSTD_DCtx *dctx;
@@ -59,6 +68,7 @@ static void zstd_destroy(struct zcomp_ctx *ctx)
 	if (!zctx)
 		return;
 
+	/* ->cctx / ->dctx are "embedded" into these buffers */
 	vfree(zctx->cctx_mem);
 	vfree(zctx->dctx_mem);
 	kfree(zctx);
@@ -97,6 +107,7 @@ static int zstd_create(struct zcomp_params *params, struct zcomp_ctx *ctx)
 	return 0;
 
 error:
+	zstd_release_params(params);
 	zstd_destroy(ctx);
 	return -EINVAL;
 }

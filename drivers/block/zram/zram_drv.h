@@ -22,12 +22,17 @@
 
 #define SECTORS_PER_PAGE_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
 #define SECTORS_PER_PAGE	(1 << SECTORS_PER_PAGE_SHIFT)
-#define ZRAM_MAX_ALGO_NAME_SZ	64
 #define ZRAM_LOGICAL_BLOCK_SHIFT 12
 #define ZRAM_LOGICAL_BLOCK_SIZE	(1 << ZRAM_LOGICAL_BLOCK_SHIFT)
 #define ZRAM_SECTOR_PER_LOGICAL_BLOCK	\
 	(1 << (ZRAM_LOGICAL_BLOCK_SHIFT - SECTOR_SHIFT))
 
+/*
+ * Maximum length of a compressor name accepted by /sys/block/zramX/comp_algorithm.
+ * Upstream keeps this in zram_drv.c because it stores names in
+ * comp_algs[]; here it has to size the inline compressor[] buffer.
+ */
+#define ZRAM_MAX_ALGO_NAME_SZ	128
 
 /*
  * ZRAM is mainly used for memory efficiency so we want to keep memory
@@ -82,9 +87,10 @@ struct zram_table_entry {
 	 */
 	union {
 		unsigned long __lock;
-		struct {
+		struct attr {
 			u32 flags;
-			/* seconds since boot of the last access;
+			/*
+			 * seconds since boot of the last access;
 			 * 0 when never accessed
 			 */
 			u32 ac_time;
