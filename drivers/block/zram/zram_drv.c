@@ -286,10 +286,22 @@ static ssize_t mem_used_max_store(struct device *dev,
 }
 
 /*
+ * Return the number of seconds since boot.
+ *
+ * ktime_t is a union on this kernel and there is no
+ * ktime_get_boottime_seconds(), so go through the nanosecond helper and
+ * truncate. ac_time is a u32, matching upstream's handling.
+ */
+static u32 zram_time_secs(void)
+{
+	return (u32)(ktime_get_boot_ns() / NSEC_PER_SEC);
+}
+
+/*
  * Mark all pages which are older than or equal to cutoff as IDLE.
  * Callers should hold the zram init lock in read mode
  */
-static void mark_idle(struct zram *zram, ktime_t cutoff)
+static void mark_idle(struct zram *zram, u32 cutoff)
 {
 	int is_idle = 1;
 	unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;
@@ -303,9 +315,8 @@ static void mark_idle(struct zram *zram, ktime_t cutoff)
 		zram_slot_lock(zram, index);
 		if (zram_allocated(zram, index) &&
 				!zram_test_flag(zram, index, ZRAM_UNDER_WB)) {
-#ifdef CONFIG_ZRAM_MEMORY_TRACKING
-			is_idle = !cutoff || ktime_after(cutoff, zram->table[index].ac_time);
-#endif
+			is_idle = !cutoff ||
+				  zram->table[index].ac_time < cutoff;
 			if (is_idle)
 				zram_set_flag(zram, index, ZRAM_IDLE);
 		}
@@ -317,21 +328,18 @@ static ssize_t idle_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {
 	struct zram *zram = dev_to_zram(dev);
-	ktime_t cutoff_time = ktime_set(0, 0);
+	u32 cutoff_time = 0;
 	ssize_t rv = -EINVAL;
 
 	if (!sysfs_streq(buf, "all")) {
 		/*
-		 * If it did not parse as 'all' try to treat it as an integer
-		 * when we have memory tracking enabled.
+		 * If it did not parse as 'all' try to treat it as an integer.
 		 */
 		u64 age_sec;
 
-		if (IS_ENABLED(CONFIG_ZRAM_MEMORY_TRACKING) && !kstrtoull(buf, 0, &age_sec))
-			cutoff_time = ktime_sub(ktime_get_boottime(),
-					ns_to_ktime(age_sec * NSEC_PER_SEC));
-		else
+		if (kstrtoull(buf, 0, &age_sec))
 			goto out;
+		cutoff_time = zram_time_secs() - age_sec;
 	}
 
 	down_read(&zram->init_lock);
@@ -879,6 +887,12 @@ static int read_from_bdev(struct zram *zram, struct bio_vec *bvec,
 static void free_block_bdev(struct zram *zram, unsigned long blk_idx) {};
 #endif
 
+static void zram_accessed(struct zram *zram, u32 index)
+{
+	zram_clear_flag(zram, index, ZRAM_IDLE);
+	zram->table[index].ac_time = zram_time_secs();
+}
+
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
 
 static struct dentry *zram_debugfs_root;
@@ -893,12 +907,6 @@ static void zram_debugfs_destroy(void)
 	debugfs_remove_recursive(zram_debugfs_root);
 }
 
-static void zram_accessed(struct zram *zram, u32 index)
-{
-	zram_clear_flag(zram, index, ZRAM_IDLE);
-	zram->table[index].ac_time = ktime_get_boottime();
-}
-
 static ssize_t read_block_state(struct file *file, char __user *buf,
 				size_t count, loff_t *ppos)
 {
@@ -906,7 +914,6 @@ static ssize_t read_block_state(struct file *file, char __user *buf,
 	ssize_t index, written = 0;
 	struct zram *zram = file->private_data;
 	unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;
-	struct timespec64 ts;
 
 	kbuf = kvmalloc(count, GFP_KERNEL);
 	if (!kbuf)
@@ -926,11 +933,9 @@ static ssize_t read_block_state(struct file *file, char __user *buf,
 		if (!zram_allocated(zram, index))
 			goto next;
 
-		ts = ktime_to_timespec64(zram->table[index].ac_time);
 		copied = snprintf(kbuf + written, count,
-			"%12zd %12lld.%06lu %c%c%c%c\n",
-			index, (s64)ts.tv_sec,
-			ts.tv_nsec / NSEC_PER_USEC,
+			"%12zd %12u %c%c%c%c\n",
+			index, (u32)zram->table[index].ac_time,
 			zram_test_flag(zram, index, ZRAM_SAME) ? 's' : '.',
 			zram_test_flag(zram, index, ZRAM_WB) ? 'w' : '.',
 			zram_test_flag(zram, index, ZRAM_HUGE) ? 'h' : '.',
@@ -979,10 +984,6 @@ static void zram_debugfs_unregister(struct zram *zram)
 #else
 static void zram_debugfs_create(void) {};
 static void zram_debugfs_destroy(void) {};
-static void zram_accessed(struct zram *zram, u32 index)
-{
-	zram_clear_flag(zram, index, ZRAM_IDLE);
-};
 static void zram_debugfs_register(struct zram *zram) {};
 static void zram_debugfs_unregister(struct zram *zram) {};
 #endif
@@ -1015,7 +1016,7 @@ static ssize_t comp_algorithm_show(struct device *dev,
 	struct zram *zram = dev_to_zram(dev);
 
 	down_read(&zram->init_lock);
-	sz = zcomp_available_show(zram->compressor, buf);
+	sz = zcomp_available_show(zram->compressor, buf, 0);
 	up_read(&zram->init_lock);
 
 	return sz;
@@ -1033,8 +1034,10 @@ static ssize_t comp_algorithm_store(struct device *dev,
 	sz = strlen(compressor);
 	if (sz > 0 && compressor[sz - 1] == '\n')
 		compressor[sz - 1] = 0x00;
+	if (sz >= ZRAM_MAX_ALGO_NAME_SZ)
+		return -EINVAL;
 
-	if (!zcomp_available_algorithm(compressor))
+	if (!zcomp_lookup_backend_name(compressor))
 		return -EINVAL;
 
 	down_write(&zram->init_lock);
@@ -1206,9 +1209,7 @@ static void zram_free_page(struct zram *zram, size_t index)
 {
 	unsigned long handle;
 
-#ifdef CONFIG_ZRAM_MEMORY_TRACKING
-	zram->table[index].ac_time.tv64 = 0;
-#endif
+	zram->table[index].ac_time = 0;
 	if (zram_test_flag(zram, index, ZRAM_IDLE))
 		zram_clear_flag(zram, index, ZRAM_IDLE);
 
@@ -1296,9 +1297,9 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
 		struct zcomp_strm *zstrm = zcomp_stream_get(zram->comp);
 
 		dst = kmap_atomic(page);
-		ret = zcomp_decompress(zstrm, src, size, dst);
+		ret = zcomp_decompress(zram->comp, zstrm, src, size, dst);
 		kunmap_atomic(dst);
-		zcomp_stream_put(zram->comp);
+		zcomp_stream_put(zstrm);
 	}
 	zs_unmap_object(zram->mem_pool, handle);
 	zram_slot_unlock(zram, index);
@@ -1369,11 +1370,11 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
 compress_again:
 	zstrm = zcomp_stream_get(zram->comp);
 	src = kmap_atomic(page);
-	ret = zcomp_compress(zstrm, src, &comp_len);
+	ret = zcomp_compress(zram->comp, zstrm, src, &comp_len);
 	kunmap_atomic(src);
 
 	if (unlikely(ret)) {
-		zcomp_stream_put(zram->comp);
+		zcomp_stream_put(zstrm);
 		pr_err("Compression failed! err=%d\n", ret);
 		zs_free(zram->mem_pool, handle);
 		return ret;
@@ -1402,7 +1403,7 @@ compress_again:
 				__GFP_MOVABLE |
 				__GFP_CMA);
 	if (!handle) {
-		zcomp_stream_put(zram->comp);
+		zcomp_stream_put(zstrm);
 		atomic64_inc(&zram->stats.writestall);
 		handle = zs_malloc(zram->mem_pool, comp_len,
 				GFP_NOIO | __GFP_HIGHMEM |
@@ -1426,7 +1427,7 @@ compress_again:
 	update_used_max(zram, alloced_pages);
 
 	if (zram->limit_pages && alloced_pages > zram->limit_pages) {
-		zcomp_stream_put(zram->comp);
+		zcomp_stream_put(zstrm);
 		zs_free(zram->mem_pool, handle);
 		return -ENOMEM;
 	}
@@ -1440,7 +1441,7 @@ compress_again:
 	if (comp_len == PAGE_SIZE)
 		kunmap_atomic(src);
 
-	zcomp_stream_put(zram->comp);
+	zcomp_stream_put(zstrm);
 	zs_unmap_object(zram->mem_pool, handle);
 	atomic64_add(comp_len, &zram->stats.compr_data_size);
 out:
@@ -1768,7 +1769,9 @@ static ssize_t disksize_store(struct device *dev,
 		goto out_unlock;
 	}
 
-	comp = zcomp_create(zram->compressor);
+	zram->params.level = ZCOMP_PARAM_NOT_SET;
+	zram->params.deflate.winbits = ZCOMP_PARAM_NOT_SET;
+	comp = zcomp_create(zram->compressor, &zram->params);
 	if (IS_ERR(comp)) {
 		pr_err("Cannot initialise %s compressing backend\n",
 				zram->compressor);
