@@ -40,15 +40,21 @@
  */
 #define ZRAM_FLAG_SHIFT (PAGE_SHIFT + 1)
 
-/* Flags for zram pages (table[page_no].flags) */
+/* Only 2 bits are allowed for comp priority index */
+#define ZRAM_COMP_PRIORITY_MASK	0x3
+
+/* Flags for zram pages (table[page_no].attr.flags) */
 enum zram_pageflags {
-	/* zram slot is locked */
-	ZRAM_LOCK = ZRAM_FLAG_SHIFT,
-	ZRAM_SAME,	/* Page consists the same element */
+	ZRAM_SAME = ZRAM_FLAG_SHIFT,	/* Page consists the same element */
+	ZRAM_ENTRY_LOCK,	/* entry access lock bit */
 	ZRAM_WB,	/* page is stored on backing_device */
 	ZRAM_UNDER_WB,	/* page is under writeback */
 	ZRAM_HUGE,	/* Incompressible page */
 	ZRAM_IDLE,	/* not accessed page since last idle marking */
+	ZRAM_INCOMPRESSIBLE,	/* none of the algorithms could compress it */
+
+	ZRAM_COMP_PRIORITY_BIT1,	/* First bit of comp priority index */
+	ZRAM_COMP_PRIORITY_BIT2,	/* Second bit of comp priority index */
 
 	__NR_ZRAM_PAGEFLAGS,
 };
@@ -57,13 +63,33 @@ enum zram_pageflags {
 
 /* Allocated for each disk page */
 struct zram_table_entry {
+	/*
+	 * Either the zsmalloc handle of the compressed data or - for
+	 * ZRAM_SAME pages - the value the page is filled with. Both live
+	 * in the same word because a SAME page never has a zsmalloc
+	 * object.
+	 */
 	union {
 		unsigned long handle;
 		unsigned long element;
 	};
-	unsigned long flags;
-	/* seconds since boot of the last access; 0 when never accessed */
-	u32 ac_time;
+	/*
+	 * The lower ZRAM_FLAG_SHIFT bits of flags hold the object size, the
+	 * rest are zram_pageflags. The entry lock bit is one of those flags
+	 * and is operated on through __lock so that the lock helpers get a
+	 * plain unsigned long. ac_time shares the word to keep the whole
+	 * entry down to two words.
+	 */
+	union {
+		unsigned long __lock;
+		struct {
+			u32 flags;
+			/* seconds since boot of the last access;
+			 * 0 when never accessed
+			 */
+			u32 ac_time;
+		} attr;
+	};
 };
 
 struct zram_stats {

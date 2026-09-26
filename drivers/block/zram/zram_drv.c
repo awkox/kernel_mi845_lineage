@@ -56,19 +56,26 @@ static int zram_bvec_read(struct zram *zram, struct bio_vec *bvec,
 				u32 index, int offset, struct bio *bio);
 
 
+/*
+ * The lock bit shares attr.flags, so all accesses to it go through the
+ * __lock view of the same word. Note that this kernel has no
+ * wait_on_bit(), so we keep bit_spin_lock() (preemption disabled while
+ * spinning) rather than upstream's sleeping bit lock.
+ */
 static int zram_slot_trylock(struct zram *zram, u32 index)
 {
-	return bit_spin_trylock(ZRAM_LOCK, &zram->table[index].flags);
+	return bit_spin_trylock(ZRAM_ENTRY_LOCK,
+				&zram->table[index].__lock);
 }
 
 static void zram_slot_lock(struct zram *zram, u32 index)
 {
-	bit_spin_lock(ZRAM_LOCK, &zram->table[index].flags);
+	bit_spin_lock(ZRAM_ENTRY_LOCK, &zram->table[index].__lock);
 }
 
 static void zram_slot_unlock(struct zram *zram, u32 index)
 {
-	bit_spin_unlock(ZRAM_LOCK, &zram->table[index].flags);
+	bit_spin_unlock(ZRAM_ENTRY_LOCK, &zram->table[index].__lock);
 }
 
 static inline bool init_done(struct zram *zram)
@@ -95,19 +102,19 @@ static void zram_set_handle(struct zram *zram, u32 index, unsigned long handle)
 static bool zram_test_flag(struct zram *zram, u32 index,
 			enum zram_pageflags flag)
 {
-	return zram->table[index].flags & BIT(flag);
+	return zram->table[index].attr.flags & BIT(flag);
 }
 
 static void zram_set_flag(struct zram *zram, u32 index,
 			enum zram_pageflags flag)
 {
-	zram->table[index].flags |= BIT(flag);
+	zram->table[index].attr.flags |= BIT(flag);
 }
 
 static void zram_clear_flag(struct zram *zram, u32 index,
 			enum zram_pageflags flag)
 {
-	zram->table[index].flags &= ~BIT(flag);
+	zram->table[index].attr.flags &= ~BIT(flag);
 }
 
 static inline void zram_set_element(struct zram *zram, u32 index,
@@ -123,15 +130,15 @@ static unsigned long zram_get_element(struct zram *zram, u32 index)
 
 static size_t zram_get_obj_size(struct zram *zram, u32 index)
 {
-	return zram->table[index].flags & (BIT(ZRAM_FLAG_SHIFT) - 1);
+	return zram->table[index].attr.flags & (BIT(ZRAM_FLAG_SHIFT) - 1);
 }
 
 static void zram_set_obj_size(struct zram *zram,
 					u32 index, size_t size)
 {
-	unsigned long flags = zram->table[index].flags >> ZRAM_FLAG_SHIFT;
+	u32 flags = zram->table[index].attr.flags >> ZRAM_FLAG_SHIFT;
 
-	zram->table[index].flags = (flags << ZRAM_FLAG_SHIFT) | size;
+	zram->table[index].attr.flags = (flags << ZRAM_FLAG_SHIFT) | size;
 }
 
 static inline bool zram_allocated(struct zram *zram, u32 index)
@@ -316,7 +323,7 @@ static void mark_idle(struct zram *zram, u32 cutoff)
 		if (zram_allocated(zram, index) &&
 				!zram_test_flag(zram, index, ZRAM_UNDER_WB)) {
 			is_idle = !cutoff ||
-				  zram->table[index].ac_time < cutoff;
+				  zram->table[index].attr.ac_time < cutoff;
 			if (is_idle)
 				zram_set_flag(zram, index, ZRAM_IDLE);
 		}
@@ -890,7 +897,7 @@ static void free_block_bdev(struct zram *zram, unsigned long blk_idx) {};
 static void zram_accessed(struct zram *zram, u32 index)
 {
 	zram_clear_flag(zram, index, ZRAM_IDLE);
-	zram->table[index].ac_time = zram_time_secs();
+	zram->table[index].attr.ac_time = zram_time_secs();
 }
 
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
@@ -935,7 +942,7 @@ static ssize_t read_block_state(struct file *file, char __user *buf,
 
 		copied = snprintf(kbuf + written, count,
 			"%12zd %12u %c%c%c%c\n",
-			index, (u32)zram->table[index].ac_time,
+			index, (u32)zram->table[index].attr.ac_time,
 			zram_test_flag(zram, index, ZRAM_SAME) ? 's' : '.',
 			zram_test_flag(zram, index, ZRAM_WB) ? 'w' : '.',
 			zram_test_flag(zram, index, ZRAM_HUGE) ? 'h' : '.',
@@ -1209,7 +1216,7 @@ static void zram_free_page(struct zram *zram, size_t index)
 {
 	unsigned long handle;
 
-	zram->table[index].ac_time = 0;
+	zram->table[index].attr.ac_time = 0;
 	if (zram_test_flag(zram, index, ZRAM_IDLE))
 		zram_clear_flag(zram, index, ZRAM_IDLE);
 
@@ -1246,8 +1253,8 @@ out:
 	atomic64_dec(&zram->stats.pages_stored);
 	zram_set_handle(zram, index, 0);
 	zram_set_obj_size(zram, index, 0);
-	WARN_ON_ONCE(zram->table[index].flags &
-		~(1UL << ZRAM_LOCK | 1UL << ZRAM_UNDER_WB));
+	WARN_ON_ONCE(zram->table[index].attr.flags &
+		~(BIT(ZRAM_ENTRY_LOCK) | BIT(ZRAM_UNDER_WB)));
 }
 
 static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
@@ -2148,7 +2155,13 @@ static int __init zram_init(void)
 {
 	int ret;
 
-	BUILD_BUG_ON(__NR_ZRAM_PAGEFLAGS > BITS_PER_LONG);
+	BUILD_BUG_ON(__NR_ZRAM_PAGEFLAGS > sizeof(u32) * 8);
+	/*
+	 * The table holds one entry per disk page, so its size is charged
+	 * directly against the memory zram is meant to save. Keep it at two
+	 * 64-bit words; adding a field means reworking the layout on purpose.
+	 */
+	BUILD_BUG_ON(sizeof(struct zram_table_entry) > 2 * sizeof(u64));
 
 	ret = cpuhp_setup_state_multi(CPUHP_ZCOMP_PREPARE, "block/zram:prepare",
 				      zcomp_cpu_up_prepare, zcomp_cpu_dead);
