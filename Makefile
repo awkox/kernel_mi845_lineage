@@ -273,7 +273,8 @@ __build_one_by_one:
 
 else
 
-# We need some generic definitions (do not try to remake the file).
+# We need some generic definitions (do not try to remake the files).
+scripts/Makefile.include: ;
 scripts/Kbuild.include: ;
 include scripts/Kbuild.include
 

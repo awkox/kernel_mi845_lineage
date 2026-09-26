@@ -1,14 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0
 ####
 # kbuild: Generic definitions
 
-# Convenient variables
-comma   := ,
-quote   := "
-squote  := '
-empty   :=
-space   := $(empty) $(empty)
-space_escape := _-_SPACE_-_
-pound := \#
+include scripts/Makefile.include
 
 ###
 # Name of target with a '.' as filename prefix. foo/bar.o => foo/.bar.o
