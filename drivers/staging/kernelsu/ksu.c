@@ -20,6 +20,16 @@
 
 #include "kernel_includes.h"
 
+// selinux includes
+#include "avc_ss.h"
+#include "objsec.h"
+#include "ss/services.h"
+#include "ss/symtab.h"
+#include "xfrm.h"
+#ifndef KSU_COMPAT_USE_SELINUX_STATE
+#include "avc.h"
+#endif
+
 // uapi
 #include "include/uapi/app_profile.h"
 #include "include/uapi/feature.h"
@@ -31,20 +41,10 @@
 #include "include/arch.h"
 #include "include/klog.h"
 #include "include/ksu.h"
-#include "include/util.h"
-
-// selinux includes
-#include "avc_ss.h"
-#include "objsec.h"
-#include "ss/services.h"
-#include "ss/symtab.h"
-#include "xfrm.h"
-#ifndef KSU_COMPAT_USE_SELINUX_STATE
-#include "avc.h"
-#endif
 
 // kernel compat
 #include "kernel_compat.h"
+#include "include/util.h"
 
 #include "policy/app_profile.h"
 #include "policy/allowlist.h"

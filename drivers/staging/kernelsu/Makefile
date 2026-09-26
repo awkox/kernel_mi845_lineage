@@ -35,6 +35,11 @@ ifeq ($(shell grep -q "^DEFINE_RWLOCK(policy_rwlock);" $(srctree)/security/selin
 CFLAGS_ksu.o += -DKSU_COMPAT_HAS_EXPORTED_POLICY_RWLOCK
 endif
 
+# branch link hook vfs_statx, this newer version uses struct filename
+ifeq ($(shell grep "int vfs_statx" $(srctree)/fs/stat.c 2>/dev/null | grep -q "struct filename" 2>/dev/null; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_HAS_VFS_STATX2
+endif
+
 # branch link hook, do_faccessat
 ifeq ($(shell grep "long do_faccessat" $(srctree)/fs/open.c 2>/dev/null | grep -q "flags" 2>/dev/null; echo $$?),0)
 CFLAGS_ksu.o += -DKSU_HAS_FACCESSAT2
@@ -83,9 +88,6 @@ CFLAGS_ksu.o += $(call cc-option, -std=gnu11)
 CFLAGS_ksu.o += $(call cc-option, -std=gnu17)
 CFLAGS_ksu.o += $(call cc-option, -std=gnu23)
 CFLAGS_ksu.o += $(call cc-option, -std=gnu2y)
-
-#ifeq ($(shell $(CC) -v 2>&1 | grep -q 'clang'; echo $$?),0)
-#endif
 
 # always inline atomics
 # clang and gcc CAN try to drop a runtime C11 atomics detector

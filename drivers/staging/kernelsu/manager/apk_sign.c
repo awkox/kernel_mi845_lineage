@@ -149,14 +149,11 @@ static __always_inline bool check_v2_signature(char *path, unsigned expected_siz
 
 	path_put(&kpath);
 
-	struct file *fp = filp_open(path, O_RDONLY, 0);
+	struct file *fp = ksu_filp_open_nonotify(path, O_RDONLY | O_NOATIME);
 	if (IS_ERR(fp)) {
-		// pr_err("open %s error.\n", path);
+		pr_err("open %s error.\n", path);
 		return false;
 	}
-
-	// disable inotify for this file
-	fp->f_mode |= FMODE_NONOTIFY;
 
 	file_size = vfs_llseek(fp, 0, SEEK_END);
 	if (file_size < 0)
@@ -339,7 +336,7 @@ bool is_manager_apk(char *path)
 	char buf[KSU_MAX_PACKAGE_NAME];
 	constexpr char p[] = "me.weishu.kernelsu";
 	if (check_v2_signature(path, 0x363, "4359c171f32543394cbc23ef908c4bb94cad7c8087002ba164c8230948c21549") && 
-		!get_pkg_from_apk_path(buf, path) && !__builtin_memcmp(buf, p, sizeof(p)))
+		!get_pkg_from_apk_path(buf, path) && !memcmp_inline(buf, p, sizeof(p)))
 		return true;
 
 	// kernelsu official

@@ -1,7 +1,7 @@
 #ifndef __KSU_H_KSU
 #define __KSU_H_KSU
 
-#define KERNEL_SU_VERSION 32630
+#define KERNEL_SU_VERSION 32651
 
 struct cred* ksu_cred;
 
